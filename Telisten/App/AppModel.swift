@@ -102,6 +102,10 @@ final class AppModel: ObservableObject {
     private let keychain: KeychainStore
     private let cache: CacheStore
     private let localLibrary: LocalLibraryStore
+    private let libraryPersistenceQueue = DispatchQueue(
+        label: "Telisten.AppModel.library-persistence",
+        qos: .utility
+    )
     private let artworkStore: ArtworkStore
     private let chatAvatarStore: ChatAvatarStore
     private let telegram: TelegramService
@@ -189,7 +193,15 @@ final class AppModel: ObservableObject {
         player.onFinished = { [weak self] in self?.trackFinished() }
         player.onNext = { [weak self] in self?.next() }
         player.onPrevious = { [weak self] in self?.previous() }
-        player.onError = { [weak self] message in self?.errorMessage = message }
+        player.onError = { [weak self] message in
+            guard let self else { return }
+            if let track = self.player.track,
+               self.player.canRecoverFromCachedFile(track) {
+                self.cacheDuringPlayback(track, fallbackError: message)
+            } else {
+                self.errorMessage = message
+            }
+        }
     }
 
     func start() async {
@@ -1837,21 +1849,25 @@ final class AppModel: ObservableObject {
             player.loadStreaming(track) { offset, length in
                 try await transfer.bytes(at: offset, length: length)
             }
-            cacheDuringPlayback(track)
         }
         guard !Task.isCancelled, player.track?.id == track.id else { return }
         await loadLyrics(for: track)
     }
 
-    private func cacheDuringPlayback(_ track: Track) {
+    private func cacheDuringPlayback(_ track: Track, fallbackError: String? = nil) {
         Task { [weak self] in
             guard let self else { return }
             do {
-                _ = try await self.cachedFile(for: track)
+                let url = try await self.cachedFile(for: track)
+                guard self.player.track?.id == track.id else { return }
+                self.player.useCachedFileIfNeeded(track, from: url)
                 await self.prefetchNextPlaylistTrack(after: track)
             } catch is CancellationError {
                 return
             } catch {
+                if let fallbackError, self.player.track?.id == track.id {
+                    self.errorMessage = fallbackError
+                }
                 return
             }
         }
@@ -1958,29 +1974,37 @@ final class AppModel: ObservableObject {
         if let transfer = activeTransfers[track.id] { return transfer }
         let location = await cache.partialLocation(for: track)
         let telegram = telegram
+        let onPlaybackRequest: @Sendable () -> Void = { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.player.track?.id == track.id else { return }
+                self.cacheDuringPlayback(track)
+            }
+        }
         // Another caller may have created the transfer while resolving the
         // cache location was suspended. Two actors must never write to the same partial file.
         if let transfer = activeTransfers[track.id] { return transfer }
         let transfer = ProgressiveAudioTransfer(
             trackID: track.id,
             fileSize: track.size,
-            location: location
-        ) { offset, length, priority in
-            switch priority {
-            case .playback:
-                try await telegram.stream(
-                    track,
-                    offset: offset,
-                    length: length
-                )
-            case .background:
-                try await telegram.streamForDownload(
-                    track,
-                    offset: offset,
-                    length: length
-                )
-            }
-        }
+            location: location,
+            provider: { offset, length, priority in
+                switch priority {
+                case .playback:
+                    try await telegram.stream(
+                        track,
+                        offset: offset,
+                        length: length
+                    )
+                case .background:
+                    try await telegram.streamForDownload(
+                        track,
+                        offset: offset,
+                        length: length
+                    )
+                }
+            },
+            onPlaybackRequest: onPlaybackRequest
+        )
         activeTransfers[track.id] = transfer
         return transfer
     }
@@ -3336,15 +3360,27 @@ final class AppModel: ObservableObject {
     }
 
     private func persistLibrary() {
-        let defaults = UserDefaults.standard
-        defaults.set(Array(favorites), forKey: accountStorageKey("library.favorites"))
+        let favoriteIDs = Array(favorites)
+        let tracks = Array(knownTracks.values)
+        let queuedTracks = queue
+        let orders = playlistOrders
+        let favoritesKey = accountStorageKey("library.favorites")
+        let tracksKey = accountStorageKey("library.tracks")
+        let queueKey = accountStorageKey("player.queue")
+        let ordersKey = accountStorageKey("playlist.trackOrders")
+        let playbackModeValue = playbackMode.rawValue
         persistSavedChats()
-        defaults.set(playbackMode.rawValue, forKey: "player.playbackMode")
-        defaults.removeObject(forKey: "player.repeat")
-        defaults.removeObject(forKey: "player.shuffle")
-        defaults.set(try? JSONEncoder().encode(Array(knownTracks.values)), forKey: accountStorageKey("library.tracks"))
-        defaults.set(try? JSONEncoder().encode(queue), forKey: accountStorageKey("player.queue"))
-        defaults.set(try? JSONEncoder().encode(playlistOrders), forKey: accountStorageKey("playlist.trackOrders"))
+        libraryPersistenceQueue.async {
+            let defaults = UserDefaults.standard
+            let encoder = JSONEncoder()
+            defaults.set(favoriteIDs, forKey: favoritesKey)
+            defaults.set(playbackModeValue, forKey: "player.playbackMode")
+            defaults.removeObject(forKey: "player.repeat")
+            defaults.removeObject(forKey: "player.shuffle")
+            defaults.set(try? encoder.encode(tracks), forKey: tracksKey)
+            defaults.set(try? encoder.encode(queuedTracks), forKey: queueKey)
+            defaults.set(try? encoder.encode(orders), forKey: ordersKey)
+        }
         reconcileSharedDownloads(with: cachedIDs)
         localLibrary.savePlaylistMirror(
             LocalPlaylistMirror(

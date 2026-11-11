@@ -2,7 +2,11 @@ import Foundation
 import Security
 
 final class KeychainStore: @unchecked Sendable {
+#if os(macOS)
+    private static let defaultService = "com.telisten.player"
+#else
     private static let defaultService = "ad.neko.player"
+#endif
     private static let accessGroupPrefixInfoKey = "TelistenKeychainAccessGroupPrefix"
 
     private let service: String

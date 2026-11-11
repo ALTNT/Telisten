@@ -43,23 +43,27 @@ actor ProgressiveAudioTransfer {
     private let fileSize: Int64
     private let trackID: String
     private let provider: ProgressiveAudioByteProvider
+    private let onPlaybackRequest: @Sendable () -> Void
     private var fileURL: URL
     private let stateURL: URL
     private var handle: FileHandle?
     private var completedOffsets: Set<Int64> = []
     private var requests: [Int64: RangeRequest] = [:]
+    private var didNotifyPlaybackRequest = false
 
     init(
         trackID: String,
         fileSize: Int64,
         location: PartialCacheLocation,
-        provider: @escaping ProgressiveAudioByteProvider
+        provider: @escaping ProgressiveAudioByteProvider,
+        onPlaybackRequest: @escaping @Sendable () -> Void = {}
     ) {
         self.trackID = trackID
         self.fileSize = fileSize
         fileURL = location.dataURL
         stateURL = location.stateURL
         self.provider = provider
+        self.onPlaybackRequest = onPlaybackRequest
 
         if let data = try? Data(contentsOf: location.stateURL),
            let state = try? JSONDecoder().decode(PartialDownloadState.self, from: data),
@@ -148,6 +152,7 @@ actor ProgressiveAudioTransfer {
 
     private func chunk(at offset: Int64, priority: AudioTransferPriority) async throws -> Data {
         if completedOffsets.contains(offset) {
+            notifyPlaybackRequestIfNeeded(priority)
             return try readChunk(at: offset)
         }
 
@@ -167,6 +172,7 @@ actor ProgressiveAudioTransfer {
             requests[requestOffset] = created
             request = created
         }
+        notifyPlaybackRequestIfNeeded(priority)
 
         do {
             let data = try await request.task.value
@@ -181,6 +187,12 @@ actor ProgressiveAudioTransfer {
             }
             throw error
         }
+    }
+
+    private func notifyPlaybackRequestIfNeeded(_ priority: AudioTransferPriority) {
+        guard priority == .playback, !didNotifyPlaybackRequest else { return }
+        didNotifyPlaybackRequest = true
+        onPlaybackRequest()
     }
 
     private func storeFetched(_ data: Data, at rangeOffset: Int64) throws {

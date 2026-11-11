@@ -42,6 +42,7 @@ final class AudioPlayer: ObservableObject {
     private let resourceLoaderQueue = DispatchQueue(label: "ad.neko.player.resource-loader")
     private var wantsPlayback = false
     private var volumeBeforeMute: Float = 1
+    private var pendingStartTime: TimeInterval?
 
     init(player: AVPlayer = AVPlayer(), configureSystemPlayback: Bool = true) {
         self.player = player
@@ -66,9 +67,10 @@ final class AudioPlayer: ObservableObject {
 
     func load(_ track: Track, from url: URL, autoplay: Bool = true) {
         guard self.track?.id == track.id else { return }
+        let startAt = currentTime
         streamingResource?.cancelAll()
         streamingResource = nil
-        install(AVPlayerItem(url: url), track: track, autoplay: autoplay)
+        install(AVPlayerItem(url: url), track: track, autoplay: autoplay, startAt: startAt)
     }
 
     func loadStreaming(
@@ -92,19 +94,32 @@ final class AudioPlayer: ObservableObject {
     }
 
     func failLoading() {
-        wantsPlayback = false
         player.pause()
         isPlaying = false
         isLoading = false
         updateNowPlaying()
     }
 
-    private func install(_ item: AVPlayerItem, track: Track, autoplay: Bool) {
+    func useCachedFileIfNeeded(_ track: Track, from url: URL) {
+        guard canRecoverFromCachedFile(track),
+              player.timeControlStatus != .playing else { return }
+        let startAt = currentTime
+        streamingResource?.cancelAll()
+        streamingResource = nil
+        install(AVPlayerItem(url: url), track: track, autoplay: true, startAt: startAt)
+    }
+
+    func canRecoverFromCachedFile(_ track: Track) -> Bool {
+        self.track?.id == track.id && streamingResource != nil && wantsPlayback
+    }
+
+    private func install(_ item: AVPlayerItem, track: Track, autoplay: Bool, startAt: TimeInterval = 0) {
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         statusObservation = nil
         self.track = track
         duration = track.duration.isFinite ? max(0, track.duration) : 0
-        currentTime = 0
+        currentTime = max(0, startAt)
+        pendingStartTime = startAt > 0 ? startAt : nil
         wantsPlayback = autoplay
         isLoading = autoplay
         item.preferredForwardBufferDuration = 2
@@ -115,12 +130,34 @@ final class AudioPlayer: ObservableObject {
                 guard self.player.currentItem === item, self.track?.id == track.id else { return }
                 switch item.status {
                 case .readyToPlay:
-                    self.isLoading = false
-                    if self.wantsPlayback {
-                        self.player.play()
-                        self.isPlaying = true
+                    if let startTime = self.pendingStartTime {
+                        self.pendingStartTime = nil
+                        self.player.seek(
+                            to: CMTime(seconds: startTime, preferredTimescale: 600),
+                            toleranceBefore: .zero,
+                            toleranceAfter: .zero
+                        ) { [weak self] _ in
+                            Task { @MainActor in
+                                guard let self,
+                                      self.player.currentItem === item,
+                                      self.track?.id == track.id else { return }
+                                self.currentTime = startTime
+                                self.isLoading = false
+                                if self.wantsPlayback {
+                                    self.player.play()
+                                    self.isPlaying = true
+                                }
+                                self.updateNowPlaying()
+                            }
+                        }
+                    } else {
+                        self.isLoading = false
+                        if self.wantsPlayback {
+                            self.player.play()
+                            self.isPlaying = true
+                        }
+                        self.updateNowPlaying()
                     }
-                    self.updateNowPlaying()
                 case .failed:
                     let reason = item.error?.localizedDescription ?? "The audio format is not supported on this device."
                     self.failLoading()
@@ -147,7 +184,7 @@ final class AudioPlayer: ObservableObject {
             }
         }
         updateNowPlaying()
-        if autoplay { player.play() }
+        if autoplay && pendingStartTime == nil { player.play() }
     }
 
     func play() {
@@ -184,7 +221,11 @@ final class AudioPlayer: ObservableObject {
     }
 
     func toggleMute() {
+        #if os(macOS)
+        volume = isMuted ? max(volumeBeforeMute, 0.001) : 0
+        #else
         volume = isMuted ? max(volumeBeforeMute, 0.5) : 0
+        #endif
     }
 
     func seek(to seconds: TimeInterval) {
@@ -256,6 +297,7 @@ final class AudioPlayer: ObservableObject {
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         endObserver = nil
         statusObservation = nil
+        pendingStartTime = nil
         streamingResource?.cancelAll()
         streamingResource = nil
         player.pause()

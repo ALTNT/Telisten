@@ -1,5 +1,8 @@
 #if os(macOS) || os(visionOS)
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 struct FloatingLyricsPreferences: DynamicProperty {
     @AppStorage("floatingLyrics.fontSize") var fontSize = 32.0
@@ -91,7 +94,9 @@ struct LyricTextOutline: ViewModifier {
 
 struct FloatingLyricsSettingsView: View {
     private var preferences = FloatingLyricsPreferences()
+#if os(visionOS)
     @Environment(\.self) private var environment
+#endif
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -200,10 +205,17 @@ struct FloatingLyricsSettingsView: View {
         Binding(
             get: { Color(lyricsRGB: storage.wrappedValue) },
             set: { color in
+#if os(macOS)
+                let resolved = NSColor(color).usingColorSpace(.deviceRGB) ?? .white
+                let red = Int((min(max(resolved.redComponent, 0), 1) * 255).rounded())
+                let green = Int((min(max(resolved.greenComponent, 0), 1) * 255).rounded())
+                let blue = Int((min(max(resolved.blueComponent, 0), 1) * 255).rounded())
+#else
                 let resolved = color.resolve(in: environment)
                 let red = Int((min(max(resolved.red, 0), 1) * 255).rounded())
                 let green = Int((min(max(resolved.green, 0), 1) * 255).rounded())
                 let blue = Int((min(max(resolved.blue, 0), 1) * 255).rounded())
+#endif
                 storage.wrappedValue = (red << 16) | (green << 8) | blue
             }
         )

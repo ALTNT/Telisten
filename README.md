@@ -15,7 +15,7 @@ Telegram permissions still apply. Secret chats are not supported. Listen Togethe
 
 ## Build
 
-Both apps live here: `Telisten/` contains the SwiftUI iOS/macOS/visionOS app; [`android/`](android/README.md) contains the Kotlin/Compose Android app. Apple uses Swift MTProto libraries; Android uses TDLib and Media3.
+Both apps live here: `Telisten/` contains the SwiftUI iOS/macOS/visionOS app; [`android/`](android/README.md) contains the Kotlin/Compose Android app. Apple uses TDLibKit; Android uses TDLib and Media3.
 
 Get a Telegram API ID and hash from [my.telegram.org](https://my.telegram.org), then create your local configuration:
 
@@ -26,7 +26,7 @@ cp .env.example .env
 
 ### iOS, macOS, and visionOS
 
-Use Xcode 26.6 (Swift 6.3), with iOS 18+, macOS 15+, or visionOS 2+ as the deployment target.
+Use Xcode 16.2 (Swift 6.0). The minimum deployment targets are iOS 16.3, macOS 13, and visionOS 2.
 
 ```sh
 ./Scripts/generate-local-config.sh
@@ -34,6 +34,8 @@ open Telisten.xcodeproj
 ```
 
 Select `Telisten-iOS`, `Telisten-macOS`, or `Telisten-visionOS`, choose your signing team, and run. Review and trust the pinned `TLCodingMacros` macro if prompted. Add `--demo` to a Debug scheme to explore without logging in. XcodeGen is only needed when changing `project.yml`.
+
+To build an unsigned iOS 16.3 package for TrollStore, run `./Scripts/build-ios-tipa.sh`. It creates `Telisten-iOS-16.3.tipa` in the repository root.
 
 On visionOS, choose the Apple Vision Pro destination and install the visionOS SDK/simulator in Xcode if needed. The native app opens a resizable library window with a separate lyrics window you can place in your space. Use `--demo --demo-chat --demo-floating-lyrics` in a Debug scheme to preview both windows without signing in.
 

@@ -59,6 +59,24 @@ struct PlayerBar: View {
                 }
                 HStack(spacing: 13) {
                     #if os(macOS)
+                    Button {
+                        model.player.toggleMute()
+                    } label: {
+                        Image(systemName: model.player.volumeSymbolName)
+                            .frame(width: 28, height: 28)
+                    }
+                    .foregroundStyle(model.player.isMuted ? Color.telistenAccent : Color.secondary)
+                    .accessibilityLabel(localizedUI(model.player.isMuted ? "Unmute" : "Mute"))
+                    Slider(
+                        value: Binding(
+                            get: { Double(model.player.volume) },
+                            set: { model.player.volume = Float($0) }
+                        ),
+                        in: 0...1
+                    )
+                    .frame(width: 112)
+                    .accessibilityLabel("Volume")
+                    .accessibilityValue("\(Int(model.player.volume * 100))%")
                     Button(showsLyrics ? "Hide Lyrics" : "Lyrics", systemImage: "quote.bubble") {
                         withAnimation(.easeInOut(duration: 0.2)) {
                             showsLyrics.toggle()

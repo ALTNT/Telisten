@@ -318,7 +318,11 @@ struct BotSearchConversationView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.bordered)
+#if os(macOS)
+        .buttonBorderShape(.roundedRectangle)
+#else
         .buttonBorderShape(.roundedRectangle(radius: 8))
+#endif
         .controlSize(.small)
         .tint(Color.telistenAccent)
         .disabled(model.isBotSearching || button.action == .unsupported)

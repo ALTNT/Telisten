@@ -62,7 +62,6 @@ struct TelistenApp: App {
         .windowResizability(.contentSize)
         #if os(macOS)
         .windowStyle(.hiddenTitleBar)
-        .windowBackgroundDragBehavior(.enabled)
         .defaultPosition(.bottom)
         #endif
         #if os(visionOS)

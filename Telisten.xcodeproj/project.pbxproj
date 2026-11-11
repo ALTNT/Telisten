@@ -7,9 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		C2734E73E900A23D64312593 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = AC1DF2E4E87F87D02041275E /* Localizable.xcstrings */; };
-		7F7768A01DF7C749D1FDB308 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = AC1DF2E4E87F87D02041275E /* Localizable.xcstrings */; };
-		C0990789261CD19826E5AA1E /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = AC1DF2E4E87F87D02041275E /* Localizable.xcstrings */; };
 		0454A092D39A0C796E147CDF /* LyricsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 022F78B1FC165CE43193E9F4 /* LyricsService.swift */; };
 		07BE48A0409B84BA0890B214 /* ListenTogetherContactPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E4160FD92BB8144074EC930 /* ListenTogetherContactPicker.swift */; };
 		080326E075FDB46AA123FA55 /* ListenTogetherContactPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E4160FD92BB8144074EC930 /* ListenTogetherContactPicker.swift */; };
@@ -38,20 +35,6 @@
 		3A29476A02CCF909B8EC64A7 /* PlayerBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF809D17F97794FEC1860425 /* PlayerBar.swift */; };
 		3AA152924E8AF2C1E4033758 /* ListenTogetherBroadcaster.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86FA2BBE87DED0C981DCD8AF /* ListenTogetherBroadcaster.swift */; };
 		46458C50A95FAD058B75A50E /* VisionAssets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = BFE6955A199D0D0BC6CE3523 /* VisionAssets.xcassets */; };
-		A1C000000000000000000001 /* Icon20.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D000000000000000000001 /* Icon20.png */; };
-		A1C000000000000000000002 /* Icon20@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D000000000000000000002 /* Icon20@2x.png */; };
-		A1C000000000000000000003 /* Icon20@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D000000000000000000003 /* Icon20@3x.png */; };
-		A1C000000000000000000004 /* Icon29.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D000000000000000000004 /* Icon29.png */; };
-		A1C000000000000000000005 /* Icon29@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D000000000000000000005 /* Icon29@2x.png */; };
-		A1C000000000000000000006 /* Icon29@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D000000000000000000006 /* Icon29@3x.png */; };
-		A1C000000000000000000007 /* Icon40.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D000000000000000000007 /* Icon40.png */; };
-		A1C000000000000000000008 /* Icon40@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D000000000000000000008 /* Icon40@2x.png */; };
-		A1C000000000000000000009 /* Icon40@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D000000000000000000009 /* Icon40@3x.png */; };
-		A1C00000000000000000000A /* Icon60@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D00000000000000000000A /* Icon60@2x.png */; };
-		A1C00000000000000000000B /* Icon60@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D00000000000000000000B /* Icon60@3x.png */; };
-		A1C00000000000000000000C /* Icon76.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D00000000000000000000C /* Icon76.png */; };
-		A1C00000000000000000000D /* Icon76@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D00000000000000000000D /* Icon76@2x.png */; };
-		A1C00000000000000000000E /* Icon83.5@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D00000000000000000000E /* Icon83.5@2x.png */; };
 		48B068038933B27B76CAA903 /* FloatingLyricsSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 086D88AABCD626A56489CB0F /* FloatingLyricsSettings.swift */; };
 		50D4A69704D0D53917F353D9 /* ListenTogetherBroadcaster.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86FA2BBE87DED0C981DCD8AF /* ListenTogetherBroadcaster.swift */; };
 		51C7346F36A796E3304EF5CC /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89A4A78E6E3BD5DF2EEBF247 /* KeychainStore.swift */; };
@@ -70,6 +53,7 @@
 		77DC65110CE5515DF76946A4 /* ArtworkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E7178D6BBA83D68637B2955 /* ArtworkStore.swift */; };
 		79C56963437DCBF4332D7174 /* FloatingLyricExcerpt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 392408C245987E5A63D3E04E /* FloatingLyricExcerpt.swift */; };
 		7BD767DCEB1CF2AA88C5ACB0 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE9FEA5BDC3AA9F3698C9E3B /* LibraryView.swift */; };
+		7F7768A01DF7C749D1FDB308 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = AC1DF2E4E87F87D02041275E /* Localizable.xcstrings */; };
 		8730DA9D7131885F1F1425B7 /* TelegramService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F2FCA53B713BBAE7EF9C471 /* TelegramService.swift */; };
 		8733EBDA295DD1D67DA3DB14 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2080235AD36DC4C1029E0FAF /* SettingsView.swift */; };
 		8B55D4EEC0E6241E4C946311 /* CacheStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 865CD00C4B2A6BB5461E1469 /* CacheStore.swift */; };
@@ -87,6 +71,20 @@
 		9FCFE7DF4B650FF0A701E37B /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6E071E6CF12082ED188A099 /* RootView.swift */; };
 		A007A56DD9BF4F98A488B33B /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2080235AD36DC4C1029E0FAF /* SettingsView.swift */; };
 		A0FD4461CA8D44D04AE2EB9E /* StreamingAudioResource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AA615A898392D5704AF86F1 /* StreamingAudioResource.swift */; };
+		A1C000000000000000000001 /* Icon20.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D000000000000000000001 /* Icon20.png */; };
+		A1C000000000000000000002 /* Icon20@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D000000000000000000002 /* Icon20@2x.png */; };
+		A1C000000000000000000003 /* Icon20@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D000000000000000000003 /* Icon20@3x.png */; };
+		A1C000000000000000000004 /* Icon29.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D000000000000000000004 /* Icon29.png */; };
+		A1C000000000000000000005 /* Icon29@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D000000000000000000005 /* Icon29@2x.png */; };
+		A1C000000000000000000006 /* Icon29@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D000000000000000000006 /* Icon29@3x.png */; };
+		A1C000000000000000000007 /* Icon40.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D000000000000000000007 /* Icon40.png */; };
+		A1C000000000000000000008 /* Icon40@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D000000000000000000008 /* Icon40@2x.png */; };
+		A1C000000000000000000009 /* Icon40@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D000000000000000000009 /* Icon40@3x.png */; };
+		A1C00000000000000000000A /* Icon60@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D00000000000000000000A /* Icon60@2x.png */; };
+		A1C00000000000000000000B /* Icon60@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D00000000000000000000B /* Icon60@3x.png */; };
+		A1C00000000000000000000C /* Icon76.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D00000000000000000000C /* Icon76.png */; };
+		A1C00000000000000000000D /* Icon76@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D00000000000000000000D /* Icon76@2x.png */; };
+		A1C00000000000000000000E /* Icon83.5@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = A1D00000000000000000000E /* Icon83.5@2x.png */; };
 		A2C78FE6AD32D6FA639787E5 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE9FEA5BDC3AA9F3698C9E3B /* LibraryView.swift */; };
 		A684C55ABC1C9CE907229E38 /* StreamingAudioResource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AA615A898392D5704AF86F1 /* StreamingAudioResource.swift */; };
 		A7311FF0AAB96815C3B7DF61 /* HPRTMP in Frameworks */ = {isa = PBXBuildFile; productRef = CF748E860183A7D78A52C1A8 /* HPRTMP */; };
@@ -98,8 +96,11 @@
 		B5A553003C0ACA241CC2B122 /* ChatAvatarStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CBC653D37B65D391F853EFE /* ChatAvatarStore.swift */; };
 		B85C694D60EA9806E76FF41B /* TelegramLoginQRCodeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1796DBB57E990AE40EF2C236 /* TelegramLoginQRCodeView.swift */; };
 		BE4E8B2039D2EF7B585E0CE2 /* PlaylistSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82F883575CBDBABCEA052E25 /* PlaylistSheet.swift */; };
+		C0990789261CD19826E5AA1E /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = AC1DF2E4E87F87D02041275E /* Localizable.xcstrings */; };
+		C0D2D1A997184D2AAB60D518 /* MacAssets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C0D2D1A997184D2AAB60D517 /* MacAssets.xcassets */; };
 		C1E2325A63E4FF5B360853E0 /* PlaylistSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82F883575CBDBABCEA052E25 /* PlaylistSheet.swift */; };
 		C1EDF29C62AB9979FF0207E5 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 734CBCDC5DCD36CA09043C62 /* Models.swift */; };
+		C2734E73E900A23D64312593 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = AC1DF2E4E87F87D02041275E /* Localizable.xcstrings */; };
 		C4F4AC274D2F03F8E3F56609 /* TelegramMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C6F59243ACDA14748435998 /* TelegramMapping.swift */; };
 		C68E91C54D34D49E18AD1B1C /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89A4A78E6E3BD5DF2EEBF247 /* KeychainStore.swift */; };
 		C6D5B9471DA9398B7F3F3C3E /* FloatingLyricExcerpt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 392408C245987E5A63D3E04E /* FloatingLyricExcerpt.swift */; };
@@ -121,18 +122,16 @@
 		ED604ECDC497E6B652FAD55D /* TelegramService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F2FCA53B713BBAE7EF9C471 /* TelegramService.swift */; };
 		EEF7DB0FE6177C6AA04AAD84 /* Formatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A065497ED165324D5CBEFDE8 /* Formatting.swift */; };
 		EF14D1E81C2B296FE89805FE /* AudioPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C5CF5DAB218AEAEA7D8B04E /* AudioPlayer.swift */; };
+		F00000000000000000000201 /* TDLibKit in Frameworks */ = {isa = PBXBuildFile; productRef = F00000000000000000000101 /* TDLibKit */; };
+		F00000000000000000000202 /* TDLibKit in Frameworks */ = {isa = PBXBuildFile; productRef = F00000000000000000000102 /* TDLibKit */; };
+		F00000000000000000000203 /* TDLibKit in Frameworks */ = {isa = PBXBuildFile; productRef = F00000000000000000000103 /* TDLibKit */; };
 		F082AAF72341168BD5882F2E /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89A4A78E6E3BD5DF2EEBF247 /* KeychainStore.swift */; };
 		F5FBAD1AD47AB85D7BA175E3 /* NowPlayingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D30E8365362E333D85AE36F6 /* NowPlayingView.swift */; };
 		F868AB7962ABFC6B829DE9C7 /* ListenTogetherContactPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E4160FD92BB8144074EC930 /* ListenTogetherContactPicker.swift */; };
 		FE3042380DD2359EC57DF008 /* ListenTogetherView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 970F5F7259822B09641BC4DA /* ListenTogetherView.swift */; };
-		FF0A2DE712DC93536E35FA09 /* Appicon.icon in Resources */ = {isa = PBXBuildFile; fileRef = A5F0DB3B7AB59FDC3441568E /* Appicon.icon */; };
-		F00000000000000000000201 /* TDLibKit in Frameworks */ = {isa = PBXBuildFile; productRef = F00000000000000000000101 /* TDLibKit */; };
-		F00000000000000000000202 /* TDLibKit in Frameworks */ = {isa = PBXBuildFile; productRef = F00000000000000000000102 /* TDLibKit */; };
-		F00000000000000000000203 /* TDLibKit in Frameworks */ = {isa = PBXBuildFile; productRef = F00000000000000000000103 /* TDLibKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		AC1DF2E4E87F87D02041275E /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		022F78B1FC165CE43193E9F4 /* LyricsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricsService.swift; sourceTree = "<group>"; };
 		0572FBB1255C72296722042E /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		05E2196CD2B35E0C39DC30FE /* UserFacingError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserFacingError.swift; sourceTree = "<group>"; };
@@ -147,9 +146,9 @@
 		3F2FCA53B713BBAE7EF9C471 /* TelegramService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramService.swift; sourceTree = "<group>"; };
 		4E4160FD92BB8144074EC930 /* ListenTogetherContactPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListenTogetherContactPicker.swift; sourceTree = "<group>"; };
 		4E7178D6BBA83D68637B2955 /* ArtworkStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtworkStore.swift; sourceTree = "<group>"; };
-		50601B52E7778D8B4C6D8FB0 /* Telisten-macOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Telisten-macOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		50601B52E7778D8B4C6D8FB0 /* Telisten.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Telisten.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5153C34F74190947B66B659F /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
-		5E1ACE742A3CC5AF14FFC51A /* Telisten-visionOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "Telisten-visionOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		5E1ACE742A3CC5AF14FFC51A /* Telisten.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Telisten.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6C6F59243ACDA14748435998 /* TelegramMapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramMapping.swift; sourceTree = "<group>"; };
 		734CBCDC5DCD36CA09043C62 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		7CBC653D37B65D391F853EFE /* ChatAvatarStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatAvatarStore.swift; sourceTree = "<group>"; };
@@ -160,33 +159,35 @@
 		970F5F7259822B09641BC4DA /* ListenTogetherView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListenTogetherView.swift; sourceTree = "<group>"; };
 		9AA615A898392D5704AF86F1 /* StreamingAudioResource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingAudioResource.swift; sourceTree = "<group>"; };
 		A065497ED165324D5CBEFDE8 /* Formatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Formatting.swift; sourceTree = "<group>"; };
-		A5E7173B5042D701CCD0BB3F /* AppConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfiguration.swift; sourceTree = "<group>"; };
-		A5F0DB3B7AB59FDC3441568E /* Appicon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = Appicon.icon; sourceTree = "<group>"; };
-		A6E071E6CF12082ED188A099 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
-		B077ECC539382C0709F1A6D2 /* LocalLibraryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalLibraryStore.swift; sourceTree = "<group>"; };
-		B708864915D6F412BE934AEE /* Telisten-macOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Telisten-macOS.entitlements"; sourceTree = "<group>"; };
-		BFE6955A199D0D0BC6CE3523 /* VisionAssets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = VisionAssets.xcassets; sourceTree = "<group>"; };
-		A1D000000000000000000001 /* Icon20.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icon20.png"; sourceTree = "<group>"; };
+		A1D000000000000000000001 /* Icon20.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = Icon20.png; sourceTree = "<group>"; };
 		A1D000000000000000000002 /* Icon20@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icon20@2x.png"; sourceTree = "<group>"; };
 		A1D000000000000000000003 /* Icon20@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icon20@3x.png"; sourceTree = "<group>"; };
-		A1D000000000000000000004 /* Icon29.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icon29.png"; sourceTree = "<group>"; };
+		A1D000000000000000000004 /* Icon29.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = Icon29.png; sourceTree = "<group>"; };
 		A1D000000000000000000005 /* Icon29@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icon29@2x.png"; sourceTree = "<group>"; };
 		A1D000000000000000000006 /* Icon29@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icon29@3x.png"; sourceTree = "<group>"; };
-		A1D000000000000000000007 /* Icon40.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icon40.png"; sourceTree = "<group>"; };
+		A1D000000000000000000007 /* Icon40.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = Icon40.png; sourceTree = "<group>"; };
 		A1D000000000000000000008 /* Icon40@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icon40@2x.png"; sourceTree = "<group>"; };
 		A1D000000000000000000009 /* Icon40@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icon40@3x.png"; sourceTree = "<group>"; };
 		A1D00000000000000000000A /* Icon60@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icon60@2x.png"; sourceTree = "<group>"; };
 		A1D00000000000000000000B /* Icon60@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icon60@3x.png"; sourceTree = "<group>"; };
-		A1D00000000000000000000C /* Icon76.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icon76.png"; sourceTree = "<group>"; };
+		A1D00000000000000000000C /* Icon76.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = Icon76.png; sourceTree = "<group>"; };
 		A1D00000000000000000000D /* Icon76@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icon76@2x.png"; sourceTree = "<group>"; };
 		A1D00000000000000000000E /* Icon83.5@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Icon83.5@2x.png"; sourceTree = "<group>"; };
+		A5E7173B5042D701CCD0BB3F /* AppConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfiguration.swift; sourceTree = "<group>"; };
+		A5F0DB3B7AB59FDC3441568E /* Appicon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = Appicon.icon; sourceTree = "<group>"; };
+		A6E071E6CF12082ED188A099 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		AC1DF2E4E87F87D02041275E /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		B077ECC539382C0709F1A6D2 /* LocalLibraryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalLibraryStore.swift; sourceTree = "<group>"; };
+		B708864915D6F412BE934AEE /* Telisten-macOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Telisten-macOS.entitlements"; sourceTree = "<group>"; };
+		BFE6955A199D0D0BC6CE3523 /* VisionAssets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = VisionAssets.xcassets; sourceTree = "<group>"; };
 		C3DAE2449C18219C395A0F26 /* Telisten-iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Telisten-iOS.entitlements"; sourceTree = "<group>"; };
+		C0D2D1A997184D2AAB60D517 /* MacAssets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = MacAssets.xcassets; sourceTree = "<group>"; };
 		CF1D062C6A533F2A90AEB96E /* Telisten.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Telisten.xcconfig; sourceTree = "<group>"; };
 		D30E8365362E333D85AE36F6 /* NowPlayingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingView.swift; sourceTree = "<group>"; };
 		DF809D17F97794FEC1860425 /* PlayerBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerBar.swift; sourceTree = "<group>"; };
 		E7B07A69B310BD8ADB95C699 /* BotSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotSearchView.swift; sourceTree = "<group>"; };
 		EE9FEA5BDC3AA9F3698C9E3B /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
-		FA45AFCDAD9D81F449E8F27C /* Telisten-iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "Telisten-iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		FA45AFCDAD9D81F449E8F27C /* Telisten.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Telisten.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -281,6 +282,7 @@
 				C3DAE2449C18219C395A0F26 /* Telisten-iOS.entitlements */,
 				B708864915D6F412BE934AEE /* Telisten-macOS.entitlements */,
 				BFE6955A199D0D0BC6CE3523 /* VisionAssets.xcassets */,
+				C0D2D1A997184D2AAB60D517 /* MacAssets.xcassets */,
 				A1E000000000000000000001 /* AppIcons */,
 			);
 			path = Telisten;
@@ -295,6 +297,27 @@
 				05E2196CD2B35E0C39DC30FE /* UserFacingError.swift */,
 			);
 			path = Core;
+			sourceTree = "<group>";
+		};
+		A1E000000000000000000001 /* AppIcons */ = {
+			isa = PBXGroup;
+			children = (
+				A1D000000000000000000001 /* Icon20.png */,
+				A1D000000000000000000002 /* Icon20@2x.png */,
+				A1D000000000000000000003 /* Icon20@3x.png */,
+				A1D000000000000000000004 /* Icon29.png */,
+				A1D000000000000000000005 /* Icon29@2x.png */,
+				A1D000000000000000000006 /* Icon29@3x.png */,
+				A1D000000000000000000007 /* Icon40.png */,
+				A1D000000000000000000008 /* Icon40@2x.png */,
+				A1D000000000000000000009 /* Icon40@3x.png */,
+				A1D00000000000000000000A /* Icon60@2x.png */,
+				A1D00000000000000000000B /* Icon60@3x.png */,
+				A1D00000000000000000000C /* Icon76.png */,
+				A1D00000000000000000000D /* Icon76@2x.png */,
+				A1D00000000000000000000E /* Icon83.5@2x.png */,
+			);
+			path = AppIcons;
 			sourceTree = "<group>";
 		};
 		A7D91B5D291604DB43925F66 /* Player */ = {
@@ -341,32 +364,11 @@
 		E730ED3298A57F5C319165B2 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				FA45AFCDAD9D81F449E8F27C /* Telisten-iOS.app */,
-				50601B52E7778D8B4C6D8FB0 /* Telisten-macOS.app */,
-				5E1ACE742A3CC5AF14FFC51A /* Telisten-visionOS.app */,
+				FA45AFCDAD9D81F449E8F27C /* Telisten.app */,
+				50601B52E7778D8B4C6D8FB0 /* Telisten.app */,
+				5E1ACE742A3CC5AF14FFC51A /* Telisten.app */,
 			);
 			name = Products;
-			sourceTree = "<group>";
-		};
-		A1E000000000000000000001 /* AppIcons */ = {
-			isa = PBXGroup;
-			children = (
-				A1D000000000000000000001 /* Icon20.png */,
-				A1D000000000000000000002 /* Icon20@2x.png */,
-				A1D000000000000000000003 /* Icon20@3x.png */,
-				A1D000000000000000000004 /* Icon29.png */,
-				A1D000000000000000000005 /* Icon29@2x.png */,
-				A1D000000000000000000006 /* Icon29@3x.png */,
-				A1D000000000000000000007 /* Icon40.png */,
-				A1D000000000000000000008 /* Icon40@2x.png */,
-				A1D000000000000000000009 /* Icon40@3x.png */,
-				A1D00000000000000000000A /* Icon60@2x.png */,
-				A1D00000000000000000000B /* Icon60@3x.png */,
-				A1D00000000000000000000C /* Icon76.png */,
-				A1D00000000000000000000D /* Icon76@2x.png */,
-				A1D00000000000000000000E /* Icon83.5@2x.png */,
-			);
-			path = AppIcons;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -390,7 +392,7 @@
 				EFB8585592FA9759FA21DA85 /* HPRTMP */,
 			);
 			productName = "Telisten-macOS";
-			productReference = 50601B52E7778D8B4C6D8FB0 /* Telisten-macOS.app */;
+			productReference = 50601B52E7778D8B4C6D8FB0 /* Telisten.app */;
 			productType = "com.apple.product-type.application";
 		};
 		7BBF8C60974D198E588A9720 /* Telisten-iOS */ = {
@@ -411,7 +413,7 @@
 				CF748E860183A7D78A52C1A8 /* HPRTMP */,
 			);
 			productName = "Telisten-iOS";
-			productReference = FA45AFCDAD9D81F449E8F27C /* Telisten-iOS.app */;
+			productReference = FA45AFCDAD9D81F449E8F27C /* Telisten.app */;
 			productType = "com.apple.product-type.application";
 		};
 		F159277ACC51DBD7DE78272F /* Telisten-visionOS */ = {
@@ -432,7 +434,7 @@
 				1FB0E2FD13DC6CC2A66C3A67 /* HPRTMP */,
 			);
 			productName = "Telisten-visionOS";
-			productReference = 5E1ACE742A3CC5AF14FFC51A /* Telisten-visionOS.app */;
+			productReference = 5E1ACE742A3CC5AF14FFC51A /* Telisten.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -445,15 +447,12 @@
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
 					1A7A2D52BE3C61C0AE406153 = {
-						DevelopmentTeam = 7P8CLHDH5G;
 						ProvisioningStyle = Automatic;
 					};
 					7BBF8C60974D198E588A9720 = {
-						DevelopmentTeam = 7P8CLHDH5G;
 						ProvisioningStyle = Automatic;
 					};
 					F159277ACC51DBD7DE78272F = {
-						DevelopmentTeam = 7P8CLHDH5G;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -528,7 +527,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				7F7768A01DF7C749D1FDB308 /* Localizable.xcstrings in Resources */,
-				FF0A2DE712DC93536E35FA09 /* Appicon.icon in Resources */,
+				C0D2D1A997184D2AAB60D518 /* MacAssets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -661,6 +660,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "Telisten/Telisten-iOS.entitlements";
+				DEVELOPMENT_TEAM = 58ZQC3ACLK;
 				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = "Telisten/Info-visionOS.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Telisten;
@@ -683,21 +683,22 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = CF1D062C6A533F2A90AEB96E /* Telisten.xcconfig */;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = Appicon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "Telisten/Telisten-macOS.entitlements";
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = 58ZQC3ACLK;
 				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = "Telisten/Info-macOS.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Telisten;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
-				INFOPLIST_KEY_LSMinimumSystemVersion = 15.0;
+				INFOPLIST_KEY_LSMinimumSystemVersion = 13.0;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Kitta Ltd";
 				INFOPLIST_KEY_NSMainStoryboardFile = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = ad.neko.player;
+				PRODUCT_BUNDLE_IDENTIFIER = com.telisten.player;
 				PRODUCT_NAME = Telisten;
 				SDKROOT = macosx;
 			};
@@ -709,6 +710,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = "Telisten/Telisten-iOS.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = 58ZQC3ACLK;
 				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = "Telisten/Info-iOS.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Telisten;
@@ -736,6 +738,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "Telisten/Telisten-iOS.entitlements";
+				DEVELOPMENT_TEAM = 58ZQC3ACLK;
 				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = "Telisten/Info-visionOS.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Telisten;
@@ -758,21 +761,22 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = CF1D062C6A533F2A90AEB96E /* Telisten.xcconfig */;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = Appicon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "Telisten/Telisten-macOS.entitlements";
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = 58ZQC3ACLK;
 				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = "Telisten/Info-macOS.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Telisten;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
-				INFOPLIST_KEY_LSMinimumSystemVersion = 15.0;
+				INFOPLIST_KEY_LSMinimumSystemVersion = 13.0;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Kitta Ltd";
 				INFOPLIST_KEY_NSMainStoryboardFile = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = ad.neko.player;
+				PRODUCT_BUNDLE_IDENTIFIER = com.telisten.player;
 				PRODUCT_NAME = Telisten;
 				SDKROOT = macosx;
 			};
@@ -817,7 +821,7 @@
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 27;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = 7P8CLHDH5G;
+				DEVELOPMENT_TEAM = 58ZQC3ACLK;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -837,7 +841,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.3;
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 1.0.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -857,6 +861,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = "Telisten/Telisten-iOS.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = 58ZQC3ACLK;
 				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = "Telisten/Info-iOS.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Telisten;
@@ -917,7 +922,7 @@
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 27;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = 7P8CLHDH5G;
+				DEVELOPMENT_TEAM = 58ZQC3ACLK;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -931,7 +936,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.3;
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 1.0.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;

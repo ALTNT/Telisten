@@ -345,7 +345,11 @@ struct LoginView: View {
             .padding(.horizontal, 6)
         }
         .buttonStyle(.borderedProminent)
+#if os(macOS)
+        .buttonBorderShape(.roundedRectangle)
+#else
         .buttonBorderShape(.capsule)
+#endif
         .controlSize(.large)
         .disabled(disabled || model.isLoading)
     }

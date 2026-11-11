@@ -17,13 +17,17 @@ struct LocalPlaylistMirror: Codable, Equatable, Sendable {
 }
 
 final class LocalLibraryStore {
-    private struct Snapshot: Codable {
+    private struct Snapshot: Codable, Sendable {
         var version = 1
         var downloadedTracks: [String: Track] = [:]
         var playlistsByAccount: [String: LocalPlaylistMirror] = [:]
     }
 
     private let fileURL: URL
+    private let persistenceQueue = DispatchQueue(
+        label: "Telisten.LocalLibraryStore.persistence",
+        qos: .utility
+    )
     private var snapshot: Snapshot
 
     init(fileManager: FileManager = .default) {
@@ -69,7 +73,11 @@ final class LocalLibraryStore {
     }
 
     private func persist() {
-        guard let data = try? JSONEncoder().encode(snapshot) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        let snapshotToPersist = snapshot
+        let destinationURL = fileURL
+        persistenceQueue.async {
+            guard let data = try? JSONEncoder().encode(snapshotToPersist) else { return }
+            try? data.write(to: destinationURL, options: .atomic)
+        }
     }
 }

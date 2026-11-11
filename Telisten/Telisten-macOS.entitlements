@@ -8,7 +8,7 @@
 	<true/>
 	<key>keychain-access-groups</key>
 	<array>
-		<string>$(AppIdentifierPrefix)ad.neko.player</string>
+		<string>$(AppIdentifierPrefix)com.telisten.player</string>
 	</array>
 </dict>
 </plist>

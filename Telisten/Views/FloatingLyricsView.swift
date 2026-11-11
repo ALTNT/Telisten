@@ -27,7 +27,9 @@ struct OpenLyricsWindowButton: View {
 struct FloatingLyricsView: View {
     @ObservedObject var model: AppModel
     private var preferences = FloatingLyricsPreferences()
+#if os(visionOS)
     @Environment(\.dismissWindow) private var dismissWindow
+#endif
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     @State private var isHovering = false
     @State private var showsSettings = false
@@ -110,7 +112,7 @@ struct FloatingLyricsView: View {
         .navigationTitle("Floating Lyrics")
         #if os(macOS)
         .ignoresSafeArea()
-        .containerBackground(.clear, for: .window)
+        .background(Color.clear)
         .background {
             LyricsOverlayWindow(
                 controller: windowController,
@@ -129,12 +131,20 @@ struct FloatingLyricsView: View {
     private var controls: some View {
         HStack(spacing: 8) {
             #if os(macOS)
-            Image(systemName: "circle.grid.2x2.fill")
-                .frame(width: 24, height: 28)
-                .contentShape(Rectangle())
-                .gesture(WindowDragGesture())
-                .help("Drag to move lyrics")
-                .accessibilityLabel("Move lyrics window")
+            if #available(macOS 15.0, *) {
+                Image(systemName: "circle.grid.2x2.fill")
+                    .frame(width: 24, height: 28)
+                    .contentShape(Rectangle())
+                    .gesture(WindowDragGesture())
+                    .help("Drag to move lyrics")
+                    .accessibilityLabel("Move lyrics window")
+            } else {
+                Image(systemName: "circle.grid.2x2.fill")
+                    .frame(width: 24, height: 28)
+                    .contentShape(Rectangle())
+                    .help("Drag to move lyrics")
+                    .accessibilityLabel("Move lyrics window")
+            }
             #endif
             Text(trackTitle)
                 .font(.caption.weight(.medium))
@@ -169,7 +179,11 @@ struct FloatingLyricsView: View {
                 .accessibilityIdentifier("lyrics.lock")
             #endif
             Button("Close Lyrics", systemImage: "xmark") {
+#if os(macOS)
+                windowController.window?.close()
+#else
                 dismissWindow(id: LyricsWindow.id, value: LyricsWindow.currentPlayback)
+#endif
             }
             .accessibilityIdentifier("lyrics.close")
         }
