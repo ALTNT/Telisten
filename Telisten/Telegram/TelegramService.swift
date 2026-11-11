@@ -973,7 +973,7 @@ actor TelegramService {
         to destination: URL,
         progress: @escaping @Sendable (Double) async -> Void
     ) async throws {
-        guard let fileID = refreshedFileIDs[track.id] ?? TelegramMapping.fileID(from: track.documentID) else {
+        guard let fileID = await resolvedFileID(for: track) else {
             throw ServiceError.incompleteDownload
         }
         await progress(0)
@@ -982,7 +982,7 @@ actor TelegramService {
             do {
                 data = try await downloadFile(fileID: fileID, offset: 0, limit: 0)
             } catch {
-                guard isFileNotFound(error),
+                guard isFileNotFound(error) || isIncompleteDownload(error),
                       let latestFileID = await refreshedFileID(for: track),
                       latestFileID != fileID else { throw error }
                 refreshedFileIDs[track.id] = latestFileID
@@ -1036,7 +1036,8 @@ actor TelegramService {
         length requestedLength: Int32,
         priority: AudioTransferPriority
     ) async throws -> Data {
-        guard let fileID = refreshedFileIDs[track.id] ?? TelegramMapping.fileID(from: track.documentID), requestedOffset >= 0 else {
+        guard requestedOffset >= 0,
+              let fileID = await resolvedFileID(for: track) else {
             throw ServiceError.incompleteDownload
         }
         if requestedLength <= 0 { return Data() }
@@ -1048,7 +1049,7 @@ actor TelegramService {
                 priority: priority
             )
         } catch {
-            guard isFileNotFound(error),
+            guard isFileNotFound(error) || isIncompleteDownload(error),
                   let latestFileID = await refreshedFileID(for: track),
                   latestFileID != fileID else { throw readableDownloadError(error) }
             refreshedFileIDs[track.id] = latestFileID
@@ -1391,31 +1392,93 @@ actor TelegramService {
         priority: AudioTransferPriority = .background
     ) async throws -> Data {
         let client = try await requireReadyClient()
-        await fileDownloadGate.acquire(fileID: fileID, priority: priority)
-        do {
-            try Task.checkCancellation()
-            let file = try await client.downloadFile(
-                fileId: fileID,
-                limit: limit,
-                offset: offset,
-                priority: 32,
-                synchronous: true
-            )
-            guard !file.local.path.isEmpty else { throw ServiceError.incompleteDownload }
-            let data = try Data(contentsOf: URL(fileURLWithPath: file.local.path), options: .mappedIfSafe)
-            guard offset <= Int64(Int.max) else { throw ServiceError.incompleteDownload }
-            let start = Int(offset)
-            let requestedCount = limit == 0 ? data.count - min(start, data.count) : Int(min(limit, Int64(Int.max)))
-            let end = min(data.count, start + max(0, requestedCount))
-            guard start <= data.count, (limit == 0 || end - start == requestedCount) else {
-                throw ServiceError.incompleteDownload
+        var cancellationRetries = 0
+        while true {
+            await fileDownloadGate.acquire(fileID: fileID, priority: priority)
+            do {
+                try Task.checkCancellation()
+                let file = try await client.downloadFile(
+                    fileId: fileID,
+                    limit: limit,
+                    offset: offset,
+                    priority: 32,
+                    synchronous: true
+                )
+                let data: Data
+                do {
+                    data = try readLocalFile(file, offset: offset, limit: limit)
+                } catch let error as ServiceError {
+                    guard isIncompleteDownload(error), limit > 0 else { throw error }
+                    try Task.checkCancellation()
+                    let completeFile = try await client.downloadFile(
+                        fileId: fileID,
+                        limit: 0,
+                        offset: 0,
+                        priority: 32,
+                        synchronous: true
+                    )
+                    data = try readLocalFile(completeFile, offset: offset, limit: limit)
+                }
+                await fileDownloadGate.release(fileID: fileID)
+                return data
+            } catch {
+                await fileDownloadGate.release(fileID: fileID)
+                guard isDownloadCancelled(error), cancellationRetries < 2 else {
+                    throw readableDownloadError(error)
+                }
+                cancellationRetries += 1
+                try Task.checkCancellation()
+                try await Task.sleep(nanoseconds: 200_000_000)
             }
-            await fileDownloadGate.release(fileID: fileID)
-            return data.subdata(in: start..<end)
-        } catch {
-            await fileDownloadGate.release(fileID: fileID)
-            throw readableDownloadError(error)
         }
+    }
+
+    private func readLocalFile(_ file: File, offset: Int64, limit: Int64) throws -> Data {
+        guard !file.local.path.isEmpty,
+              offset >= 0,
+              limit >= 0,
+              offset <= Int64(Int.max) else {
+            throw ServiceError.incompleteDownload
+        }
+        let fileURL = URL(fileURLWithPath: file.local.path)
+        guard let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey]),
+              let fileSize = values.fileSize else {
+            throw ServiceError.incompleteDownload
+        }
+        let availableEnd = file.local.downloadOffset.addingReportingOverflow(file.local.downloadedPrefixSize)
+        let requestedCount = limit == 0 ? Int64(fileSize) - offset : limit
+        let requestedEnd = offset.addingReportingOverflow(requestedCount)
+        guard file.local.downloadOffset >= 0,
+              file.local.downloadedPrefixSize >= 0,
+              !availableEnd.overflow,
+              !requestedEnd.overflow,
+              requestedCount >= 0,
+              requestedCount <= Int64(Int.max),
+              requestedEnd.partialValue <= Int64(fileSize),
+              (file.local.isDownloadingCompleted
+                  || (file.local.downloadOffset <= offset && availableEnd.partialValue >= requestedEnd.partialValue)),
+              (limit != 0 || file.local.isDownloadingCompleted) else {
+            throw ServiceError.incompleteDownload
+        }
+
+        let data: Data
+        do {
+            let handle = try FileHandle(forReadingFrom: fileURL)
+            defer { try? handle.close() }
+            try handle.seek(toOffset: UInt64(offset))
+            data = try handle.read(upToCount: Int(requestedCount)) ?? Data()
+            guard data.count == Int(requestedCount) else { throw ServiceError.incompleteDownload }
+        }
+        return data
+    }
+
+    private func resolvedFileID(for track: Track) async -> Int? {
+        if let fileID = refreshedFileIDs[track.id] ?? TelegramMapping.fileID(from: track.documentID) {
+            return fileID
+        }
+        guard let fileID = await refreshedFileID(for: track) else { return nil }
+        refreshedFileIDs[track.id] = fileID
+        return fileID
     }
 
     private func refreshedFileID(for track: Track) async -> Int? {
@@ -1471,6 +1534,18 @@ actor TelegramService {
         let message = error.localizedDescription
         return message.localizedCaseInsensitiveContains("TDLib 400")
             && message.localizedCaseInsensitiveContains("File not found")
+    }
+
+    private func isDownloadCancelled(_ error: Swift.Error) -> Bool {
+        guard let error = error as? TDLibKit.Error else { return false }
+        return error.code == 400
+            && error.message.localizedCaseInsensitiveContains("File download has failed or was canceled")
+    }
+
+    private func isIncompleteDownload(_ error: Swift.Error) -> Bool {
+        guard let error = error as? ServiceError,
+              case .incompleteDownload = error else { return false }
+        return true
     }
 
     private func lyricsAttachmentMatchScore(_ fileName: String, track: Track) -> Int {

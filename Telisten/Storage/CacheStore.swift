@@ -125,17 +125,22 @@ actor ProgressiveAudioTransfer {
         var nextOffset: Int64 = 0
         var completedBytes: Int64 = 0
         var activeTasks = 0
+        var firstError: Error?
 
-        try await withThrowingTaskGroup(of: Int64.self) { group in
+        try await withThrowingTaskGroup(of: Result<Int64, Error>.self) { group in
             func addNextChunk() {
-                guard nextOffset < fileSize else { return }
+                guard firstError == nil, nextOffset < fileSize else { return }
                 let offset = nextOffset
                 nextOffset += Self.chunkSize
                 activeTasks += 1
                 group.addTask {
-                    let data = try await self.chunk(at: offset, priority: .background)
-                    guard !data.isEmpty else { throw TransferError.incompleteData }
-                    return Int64(data.count)
+                    do {
+                        let data = try await self.chunk(at: offset, priority: .background)
+                        guard !data.isEmpty else { throw TransferError.incompleteData }
+                        return .success(Int64(data.count))
+                    } catch {
+                        return .failure(error)
+                    }
                 }
             }
 
@@ -145,13 +150,19 @@ actor ProgressiveAudioTransfer {
 
             while activeTasks > 0 {
                 try Task.checkCancellation()
-                guard let bytes = try await group.next() else { break }
+                guard let result = try await group.next() else { break }
                 activeTasks -= 1
-                completedBytes += bytes
-                await progress(min(1, Double(completedBytes) / Double(fileSize)))
-                addNextChunk()
+                switch result {
+                case let .success(bytes):
+                    completedBytes += bytes
+                    await progress(min(1, Double(completedBytes) / Double(fileSize)))
+                    addNextChunk()
+                case let .failure(error):
+                    if firstError == nil { firstError = error }
+                }
             }
         }
+        if let firstError { throw firstError }
         try handle?.synchronize()
     }
 
@@ -162,8 +173,9 @@ actor ProgressiveAudioTransfer {
 
     private func chunk(at offset: Int64, priority: AudioTransferPriority) async throws -> Data {
         if completedOffsets.contains(offset) {
+            let data = try readChunk(at: offset)
             notifyPlaybackRequestIfNeeded(priority)
-            return try readChunk(at: offset)
+            return data
         }
 
         let requestOffset = offset - (offset % Self.providerChunkSize)
@@ -182,15 +194,15 @@ actor ProgressiveAudioTransfer {
             requests[requestOffset] = created
             request = created
         }
-        notifyPlaybackRequestIfNeeded(priority)
-
         do {
             let data = try await request.task.value
             try storeFetched(data, at: requestOffset)
             if requests[requestOffset]?.id == request.id {
                 requests.removeValue(forKey: requestOffset)
             }
-            return try readChunk(at: offset)
+            let chunk = try readChunk(at: offset)
+            notifyPlaybackRequestIfNeeded(priority)
+            return chunk
         } catch {
             if requests[requestOffset]?.id == request.id {
                 requests.removeValue(forKey: requestOffset)
