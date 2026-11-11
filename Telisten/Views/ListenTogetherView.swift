@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ListenTogetherView: View {
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var inviteLink: URL?

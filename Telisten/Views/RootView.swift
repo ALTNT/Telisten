@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct RootView: View {
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
     #if DEBUG && (os(macOS) || os(visionOS))
     @Environment(\.openWindow) private var openWindow
     #endif

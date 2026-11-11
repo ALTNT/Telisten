@@ -519,12 +519,15 @@ actor LyricsService {
     // Positive matches are local library data, with no expiry or network refresh
     // during playback. This lookup also keeps Telegram attachment scans off the hot path.
     func cachedLyrics(for track: Track) -> LyricsResult? {
-        var matches = fetchedMatches[track.id] ?? []
-        if let saved = cached[track.id] {
-            if !matches.contains(where: { $0.matchKey == saved.matchKey }) { matches.insert(saved, at: 0) }
-            return LyricsResult(selected: saved, matches: matches)
-        }
-        return result(for: track.id, matches: matches)
+        let saved = cached[track.id]
+        let matches = merged(saved.map { [$0] } ?? [], with: fetchedMatches[track.id] ?? [])
+        guard let defaultMatch = matches.first else { return nil }
+        let selected = selectedMatchKeys[track.id].flatMap { key in
+            matches.first(where: { $0.matchKey == key })
+        } ?? saved.flatMap { value in
+            matches.first(where: { areDuplicateLyrics($0, value) })
+        } ?? defaultMatch
+        return LyricsResult(selected: selected, matches: matches)
     }
 
     func embeddedLyrics(for track: Track, fileURL: URL) async -> LyricsResult? {
@@ -619,7 +622,7 @@ actor LyricsService {
 
     private func merged(_ preferred: [TrackLyrics], with fallback: [TrackLyrics]) -> [TrackLyrics] {
         var seen: Set<String> = []
-        return (preferred + fallback)
+        let ranked = (preferred + fallback)
             .filter { seen.insert($0.matchKey).inserted }
             .sorted { lhs, rhs in
                 let lhsEmbedded = lhs.source == "Embedded lyrics"
@@ -631,6 +634,28 @@ actor LyricsService {
                 if lhsAttached != rhsAttached { return lhsAttached }
                 return false
             }
+        var matches: [TrackLyrics] = []
+        for candidate in ranked where !matches.contains(where: { areDuplicateLyrics($0, candidate) }) {
+            matches.append(candidate)
+        }
+        return matches
+    }
+
+    private func areDuplicateLyrics(_ lhs: TrackLyrics, _ rhs: TrackLyrics) -> Bool {
+        guard let lhsTitle = lhs.matchedTitle, let rhsTitle = rhs.matchedTitle,
+              let lhsArtist = lhs.matchedArtist, let rhsArtist = rhs.matchedArtist,
+              let lhsDuration = lhs.matchedDuration, let rhsDuration = rhs.matchedDuration,
+              lhsDuration > 0, rhsDuration > 0,
+              abs(lhsDuration - rhsDuration) <= 2 else { return false }
+        return comparable(lhsTitle) == comparable(rhsTitle)
+            && comparable(lhsArtist) == comparable(rhsArtist)
+    }
+
+    private func comparable(_ value: String) -> String {
+        value
+            .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
+            .lowercased()
+            .filter { $0.isLetter || $0.isNumber }
     }
 
     func setServerURL(_ serverURL: URL) {

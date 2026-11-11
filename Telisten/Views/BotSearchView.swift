@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SearchBotProvidersView: View {
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
     let query: String
 
     init(model: AppModel, query: String) {
@@ -122,7 +122,7 @@ struct SearchBotProvidersView: View {
 }
 
 struct BotSearchConversationView: View {
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @FocusState private var composerFocused: Bool
@@ -165,7 +165,7 @@ struct BotSearchConversationView: View {
                 #endif
                 .background(Color.telistenBackground)
                 .onAppear { scrollToLatest(using: proxy, animated: false) }
-                .onChange(of: latestContentID) { _, _ in
+                .onChange(of: latestContentID) { _ in
                     scrollToLatest(using: proxy, animated: true)
                 }
             }
@@ -350,11 +350,18 @@ struct BotSearchConversationView: View {
     }
 
     private var conversationPlaceholder: some View {
-        ContentUnavailableView(
-            "No messages yet",
-            systemImage: "bubble.left.and.bubble.right",
-            description: Text("Search results and bot controls appear here.")
-        )
+        VStack(spacing: 8) {
+            Image(systemName: "bubble.left.and.bubble.right")
+                .font(.system(size: 30))
+                .foregroundStyle(.secondary)
+            Text("No messages yet")
+                .font(.headline)
+            Text("Search results and bot controls appear here.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding()
         .frame(maxWidth: .infinity, minHeight: 240)
     }
 

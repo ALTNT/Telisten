@@ -1,10 +1,11 @@
 import SwiftUI
 
 struct PlaylistSheet: View {
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
     let track: Track
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
+    @State private var saveError: String?
 
     var body: some View {
         NavigationStack {
@@ -21,6 +22,13 @@ struct PlaylistSheet: View {
                                 playlistButton(playlist)
                             }
                         }
+                    }
+                    if let saveError {
+                        Text(localizedUI(saveError))
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityLabel("Could not add song: \(saveError)")
                     }
                     newPlaylist
                 }
@@ -62,7 +70,12 @@ struct PlaylistSheet: View {
     private func playlistButton(_ playlist: MusicChat) -> some View {
         Button {
             Task {
-                if await model.save(track, to: playlist) { dismiss() }
+                saveError = nil
+                if await model.save(track, to: playlist) {
+                    dismiss()
+                } else {
+                    saveError = model.errorMessage ?? "Could not add this song to the playlist."
+                }
             }
         } label: {
             HStack(spacing: 13) {
@@ -79,6 +92,8 @@ struct PlaylistSheet: View {
                         .foregroundStyle(.tertiary)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
             .padding(.vertical, 8)
             .overlay(alignment: .bottom) { Divider() }
         }
@@ -113,7 +128,12 @@ struct PlaylistSheet: View {
 
     private func create() {
         Task {
-            if await model.createPlaylist(named: name, saving: track) { dismiss() }
+            saveError = nil
+            if await model.createPlaylist(named: name, saving: track) {
+                dismiss()
+            } else {
+                saveError = model.errorMessage ?? "Could not add this song to the playlist."
+            }
         }
     }
 }

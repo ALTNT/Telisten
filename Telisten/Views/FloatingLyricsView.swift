@@ -25,7 +25,7 @@ struct OpenLyricsWindowButton: View {
 }
 
 struct FloatingLyricsView: View {
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
     private var preferences = FloatingLyricsPreferences()
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
@@ -101,9 +101,9 @@ struct FloatingLyricsView: View {
         }
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
-        .onChange(of: model.player.track?.id) { _, _ in plainLineIndex = 0 }
-        .onChange(of: lyrics?.matchKey) { _, _ in plainLineIndex = 0 }
-        .onChange(of: preferences.isLocked) { _, locked in
+        .onChange(of: model.player.track?.id) { _ in plainLineIndex = 0 }
+        .onChange(of: lyrics?.matchKey) { _ in plainLineIndex = 0 }
+        .onChange(of: preferences.isLocked) { locked in
             if locked { isHovering = false; showsSettings = false }
         }
         .preferredColorScheme(.dark)

@@ -1,54 +1,25 @@
 import Foundation
-import MTProtoClientKit
 
 enum UserFacingError {
     static func isExpiredTelegramSession(_ error: Error) -> Bool {
-        if let rpc = error as? MTProtoRPCError {
-            return [
-                "AUTH_KEY_UNREGISTERED",
-                "SESSION_REVOKED",
-                "SESSION_EXPIRED",
-                "AUTH_KEY_DUPLICATED"
-            ].contains(rpc.message)
-        }
-        if let client = error as? MTProtoClientError,
-           case let .protocolError(code) = client {
-            return code == -404
-        }
-        return false
+        let message = error.localizedDescription.uppercased()
+        return ["AUTH_KEY_UNREGISTERED", "SESSION_REVOKED", "SESSION_EXPIRED", "AUTH_KEY_DUPLICATED"]
+            .contains(where: message.contains)
     }
 
     static func message(for error: Error) -> String {
-        if let rpc = error as? MTProtoRPCError {
-            switch rpc.message {
-            case "AUTH_KEY_UNREGISTERED", "SESSION_REVOKED", "SESSION_EXPIRED":
-                return "Your Telegram session expired. Sign in again to continue."
-            case "AUTH_KEY_DUPLICATED":
-                return "Telegram invalidated this duplicated session. Sign in again to create a fresh one."
-            case "FILE_REFERENCE_EXPIRED", "FILE_REFERENCE_INVALID":
-                return "This track reference expired. Refresh the music list and try again."
-            case "CHAT_ADMIN_REQUIRED", "RIGHT_FORBIDDEN":
-                return "Your Telegram admin role does not allow this action."
-            case "USER_PRIVACY_RESTRICTED":
-                return "A selected contact’s privacy settings do not allow a direct invitation. Share the room link instead."
-            case "USER_CHANNELS_TOO_MUCH":
-                return "A selected contact has joined Telegram’s maximum number of groups or channels."
-            default:
-                return String(format: localizedUI("Telegram error: %@"), rpc.message)
-            }
+        let message = error.localizedDescription
+        let uppercased = message.uppercased()
+        if ["AUTH_KEY_UNREGISTERED", "SESSION_REVOKED", "SESSION_EXPIRED", "AUTH_KEY_DUPLICATED"]
+            .contains(where: uppercased.contains) {
+            return "Your Telegram session expired. Sign in again to continue."
         }
-        if let client = error as? MTProtoClientError {
-            switch client {
-            case .notConnected, .connectionClosed:
-                return "The Telegram connection closed. Try again."
-            case .timeout:
-                return "Telegram did not respond in time. Check your connection and try again."
-            case let .protocolError(code):
-                return String(format: localizedUI("Telegram rejected the connection (protocol %@). Try again."), String(code))
-            case .fatalBadMessage:
-                return "Telegram rejected the encrypted session. Sign in again and retry."
-            }
+        if uppercased.contains("FILE_REFERENCE_EXPIRED") || uppercased.contains("FILE_REFERENCE_INVALID") {
+            return "This track reference expired. Refresh the music list and try again."
         }
-        return error.localizedDescription
+        if uppercased.contains("CHAT_ADMIN_REQUIRED") || uppercased.contains("RIGHT_FORBIDDEN") {
+            return "Your Telegram admin role does not allow this action."
+        }
+        return String(format: localizedUI("Telegram error: %@"), message)
     }
 }

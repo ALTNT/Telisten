@@ -3,10 +3,20 @@ import Foundation
 import UniformTypeIdentifiers
 
 typealias AudioByteProvider = @Sendable (_ offset: Int64, _ length: Int32) async throws -> Data
+typealias ProgressiveAudioByteProvider = @Sendable (
+    _ offset: Int64,
+    _ length: Int32,
+    _ priority: AudioTransferPriority
+) async throws -> Data
+
+enum AudioTransferPriority: Sendable, Equatable {
+    case playback
+    case background
+}
 
 private actor StreamWindow {
     private static let chunkSize: Int64 = 512 * 1_024
-    private static let prefetchChunkCount = 4
+    private static let prefetchChunkCount = 2
     private static let maxConcurrentFetches = 4
 
     private let fileSize: Int64

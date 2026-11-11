@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import Combine
 
 enum SidebarSelection: Hashable {
     case globalSearch
@@ -20,70 +20,69 @@ private enum QRLoginWakeReason: Sendable {
 }
 
 @MainActor
-@Observable
-final class AppModel {
+final class AppModel: ObservableObject {
     private static let chatMusicPageSize: Int32 = 30
     private static let cacheLimitDefaultsKey = "offlineCache.limitBytes"
     private static let lyricsServerDefaultsKey = "lyrics.serverURL"
 
-    var phase: ConnectionPhase = .signedOut
-    var qrCodeLoginState: QRCodeLoginState = .idle
-    var hasCredentials = false
-    var accounts: [TelegramAccount] = []
-    var activeAccountID: String?
-    var isAddingAccount = false
-    var isCancellingAccount = false
-    var chats: [MusicChat] = []
-    var selected: SidebarSelection?
-    var selectedChat: MusicChat?
-    var tracks: [Track] = []
-    var searchText = ""
-    var isGlobalSearch = false
-    var isLoading = false
-    var isLoadingMore = false
-    var hasMoreTracks = false
-    var loadMoreError: String?
-    var errorMessage: String?
-    var playlists: [MusicChat] = []
-    private(set) var playlistFolderName = PlaylistFolderConfiguration.defaultName
-    var playlistTrack: Track?
-    var showPlaylistSheet = false
-    var isSavingToPlaylist = false
-    var lyricsState: LyricsLoadState = .idle
-    var lyricsCandidates: [TrackLyrics] = []
-    var commentsState: CommentsLoadState = .idle
-    var isSendingComment = false
-    var isIndexingChats = false
-    var voteStates: [String: VoteState] = [:]
-    private(set) var isDemo = false
-    var downloads: [String: DownloadStatus] = [:]
-    var cachedIDs: Set<String> = []
-    var favorites: Set<String> = []
-    var knownTracks: [String: Track] = [:]
-    var artworkData: [String: Data] = [:]
-    var chatAvatarData: [String: Data] = [:]
-    var accountAvatarData: [String: Data] = [:]
-    var queue: [Track] = []
-    var currentQueueIndex: Int?
-    var playbackMode: PlaybackMode = .order
-    var showNowPlaying = false
-    var showListenTogetherSheet = false
-    var listenTogetherState: ListenTogetherState = .idle
-    var cacheBytes: Int64 = 0
-    var cacheLimitBytes: Int64
-    var lyricsServerURL: URL
-    var searchBots: [SearchBotConfig] = []
-    var savedChatIDs: Set<String> = []
-    var activeBotSearchConfig: SearchBotConfig?
-    var botSearchMessages: [BotSearchMessage] = []
-    var isBotSearching = false
-    var botSearchError: String?
-    var showBotSearch = false
-    var isDeletingPlaylist = false
-    var deletingPlaylistTrackIDs: Set<String> = []
-    var renamingPlaylistIDs: Set<String> = []
-    var downloadingPlaylistIDs: Set<String> = []
-    var showChats = false {
+    @Published var phase: ConnectionPhase = .signedOut
+    @Published var qrCodeLoginState: QRCodeLoginState = .idle
+    @Published var hasCredentials = false
+    @Published var accounts: [TelegramAccount] = []
+    @Published var activeAccountID: String?
+    @Published var isAddingAccount = false
+    @Published var isCancellingAccount = false
+    @Published var chats: [MusicChat] = []
+    @Published var selected: SidebarSelection?
+    @Published var selectedChat: MusicChat?
+    @Published var tracks: [Track] = []
+    @Published var searchText = ""
+    @Published var isGlobalSearch = false
+    @Published var isLoading = false
+    @Published var isLoadingMore = false
+    @Published var hasMoreTracks = false
+    @Published var loadMoreError: String?
+    @Published var errorMessage: String?
+    @Published var playlists: [MusicChat] = []
+    @Published private(set) var playlistFolderName = PlaylistFolderConfiguration.defaultName
+    @Published var playlistTrack: Track?
+    @Published var showPlaylistSheet = false
+    @Published var isSavingToPlaylist = false
+    @Published var lyricsState: LyricsLoadState = .idle
+    @Published var lyricsCandidates: [TrackLyrics] = []
+    @Published var commentsState: CommentsLoadState = .idle
+    @Published var isSendingComment = false
+    @Published var isIndexingChats = false
+    @Published var voteStates: [String: VoteState] = [:]
+    @Published private(set) var isDemo = false
+    @Published var downloads: [String: DownloadStatus] = [:]
+    @Published var cachedIDs: Set<String> = []
+    @Published var favorites: Set<String> = []
+    @Published var knownTracks: [String: Track] = [:]
+    @Published var artworkData: [String: Data] = [:]
+    @Published var chatAvatarData: [String: Data] = [:]
+    @Published var accountAvatarData: [String: Data] = [:]
+    @Published var queue: [Track] = []
+    @Published var currentQueueIndex: Int?
+    @Published var playbackMode: PlaybackMode = .order
+    @Published var showNowPlaying = false
+    @Published var showListenTogetherSheet = false
+    @Published var listenTogetherState: ListenTogetherState = .idle
+    @Published var cacheBytes: Int64 = 0
+    @Published var cacheLimitBytes: Int64
+    @Published var lyricsServerURL: URL
+    @Published var searchBots: [SearchBotConfig] = []
+    @Published var savedChatIDs: Set<String> = []
+    @Published var activeBotSearchConfig: SearchBotConfig?
+    @Published var botSearchMessages: [BotSearchMessage] = []
+    @Published var isBotSearching = false
+    @Published var botSearchError: String?
+    @Published var showBotSearch = false
+    @Published var isDeletingPlaylist = false
+    @Published var deletingPlaylistTrackIDs: Set<String> = []
+    @Published var renamingPlaylistIDs: Set<String> = []
+    @Published var downloadingPlaylistIDs: Set<String> = []
+    @Published var showChats = false {
         didSet { UserDefaults.standard.set(showChats, forKey: "library.showChats") }
     }
 
@@ -98,53 +97,58 @@ final class AppModel {
 
     let player = AudioPlayer()
 
-    @ObservationIgnored private let keychain: KeychainStore
-    @ObservationIgnored private let cache: CacheStore
-    @ObservationIgnored private let localLibrary: LocalLibraryStore
-    @ObservationIgnored private let artworkStore: ArtworkStore
-    @ObservationIgnored private let chatAvatarStore: ChatAvatarStore
-    @ObservationIgnored private let telegram: TelegramService
-    @ObservationIgnored private let lyrics: LyricsService
-    @ObservationIgnored private let listenTogetherBroadcaster = ListenTogetherBroadcaster()
-    @ObservationIgnored private var downloadTasks: [String: Task<URL, Error>] = [:]
-    @ObservationIgnored private var activeTransfers: [String: ProgressiveAudioTransfer] = [:]
-    @ObservationIgnored private var artworkLoading: Set<String> = []
-    @ObservationIgnored private var artworkResolved: Set<String> = []
-    @ObservationIgnored private var avatarLoading: Set<String> = []
-    @ObservationIgnored private var avatarResolved: Set<String> = []
-    @ObservationIgnored private var accountAvatarLoading: Set<String> = []
-    @ObservationIgnored private var accountAvatarResolved: Set<String> = []
-    @ObservationIgnored private var allChats: [MusicChat] = []
-    @ObservationIgnored private var musicChatIndex: [String: MusicChatIndexEntry] = [:]
-    @ObservationIgnored private var playlistOrders: [String: [String]] = [:]
-    @ObservationIgnored private var playlistTrackMirrors: [String: [Track]] = [:]
-    @ObservationIgnored private var unfiledPlaylistIDs: Set<String> = []
-    @ObservationIgnored private var pendingPlaylistCreationIDs: Set<String> = []
-    @ObservationIgnored private var sharedDownloadedTracks: [String: Track] = [:]
-    @ObservationIgnored private var trackSearchOffsetID: Int32 = 0
-    @ObservationIgnored private var remoteHasMoreTracks = false
-    @ObservationIgnored private var visibleTrackLimit = 30
-    @ObservationIgnored private var musicChatIndexTask: Task<Void, Never>?
-    @ObservationIgnored private var commentsTrackID: String?
-    @ObservationIgnored private var loginPhone = ""
-    @ObservationIgnored private var previousAccountID: String?
-    @ObservationIgnored private var playbackTask: Task<Void, Never>?
-    @ObservationIgnored private var qrCodeLoginTask: Task<Void, Never>?
-    @ObservationIgnored private var qrCodeLoginOperationID: UUID?
-    @ObservationIgnored private var passwordRequestedByQRCode = false
-    @ObservationIgnored private var postLoginRefreshTask: Task<Void, Never>?
-    @ObservationIgnored private var listenTogetherTask: Task<Void, Never>?
-    @ObservationIgnored private var broadcastTrackID: String?
-    @ObservationIgnored private var broadcastStartedAt: Date?
-    @ObservationIgnored private var broadcastStartOffset: TimeInterval = 0
-    @ObservationIgnored private var broadcastWasPlaying = false
-    @ObservationIgnored private var lastCallTitleUpdate: Date?
-    @ObservationIgnored private var listenerMetadataTitle: String?
-    @ObservationIgnored private var listenerMetadataObservedAt: Date?
-    @ObservationIgnored private var listenTogetherInviteLinks: [String: URL] = [:]
-    @ObservationIgnored private var botSearchOperationID: UUID?
-    @ObservationIgnored private var botSearchConversationStartID: Int32?
-    @ObservationIgnored private var botSearchRefreshTask: Task<Void, Never>?
+    private var cancellables: Set<AnyCancellable> = []
+
+    private let keychain: KeychainStore
+    private let cache: CacheStore
+    private let localLibrary: LocalLibraryStore
+    private let artworkStore: ArtworkStore
+    private let chatAvatarStore: ChatAvatarStore
+    private let telegram: TelegramService
+    private let lyrics: LyricsService
+    private let listenTogetherBroadcaster = ListenTogetherBroadcaster()
+    private var downloadTasks: [String: Task<URL, Error>] = [:]
+    private var activeTransfers: [String: ProgressiveAudioTransfer] = [:]
+    private var cacheStatusCheckedTrackIDs: Set<String> = []
+    private var pendingDownloadResumeIDs: Set<String> = []
+    private var resumingDownloadIDs: Set<String> = []
+    private var artworkLoading: Set<String> = []
+    private var artworkResolved: Set<String> = []
+    private var avatarLoading: Set<String> = []
+    private var avatarResolved: Set<String> = []
+    private var accountAvatarLoading: Set<String> = []
+    private var accountAvatarResolved: Set<String> = []
+    private var allChats: [MusicChat] = []
+    private var musicChatIndex: [String: MusicChatIndexEntry] = [:]
+    private var playlistOrders: [String: [String]] = [:]
+    private var playlistTrackMirrors: [String: [Track]] = [:]
+    private var unfiledPlaylistIDs: Set<String> = []
+    private var pendingPlaylistCreationIDs: Set<String> = []
+    private var sharedDownloadedTracks: [String: Track] = [:]
+    private var trackSearchOffsetID: Int64 = 0
+    private var remoteHasMoreTracks = false
+    private var visibleTrackLimit = 30
+    private var musicChatIndexTask: Task<Void, Never>?
+    private var commentsTrackID: String?
+    private var loginPhone = ""
+    private var previousAccountID: String?
+    private var playbackTask: Task<Void, Never>?
+    private var qrCodeLoginTask: Task<Void, Never>?
+    private var qrCodeLoginOperationID: UUID?
+    private var passwordRequestedByQRCode = false
+    private var postLoginRefreshTask: Task<Void, Never>?
+    private var listenTogetherTask: Task<Void, Never>?
+    private var broadcastTrackID: String?
+    private var broadcastStartedAt: Date?
+    private var broadcastStartOffset: TimeInterval = 0
+    private var broadcastWasPlaying = false
+    private var lastCallTitleUpdate: Date?
+    private var listenerMetadataTitle: String?
+    private var listenerMetadataObservedAt: Date?
+    private var listenTogetherInviteLinks: [String: URL] = [:]
+    private var botSearchOperationID: UUID?
+    private var botSearchConversationStartID: Int64?
+    private var botSearchRefreshTask: Task<Void, Never>?
 
     init() {
         let defaults = UserDefaults.standard
@@ -175,6 +179,13 @@ final class AppModel {
         restoreSearchBots()
         restoreAccounts()
         restoreLibrary()
+        player.objectWillChange
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.objectWillChange.send()
+                }
+            }
+            .store(in: &cancellables)
         player.onFinished = { [weak self] in self?.trackFinished() }
         player.onNext = { [weak self] in self?.next() }
         player.onPrevious = { [weak self] in self?.previous() }
@@ -590,11 +601,13 @@ final class AppModel {
         case .favorites:
             isGlobalSearch = false
             selectedChat = nil
-            tracks = favorites.compactMap { knownTracks[$0] }.sorted { $0.date > $1.date }
+            let favoriteTracks = favorites.compactMap { knownTracks[$0] }.sorted { $0.date > $1.date }
+            install(favoriteTracks)
+            tracks = favoriteTracks
         case .downloads:
             isGlobalSearch = false
             selectedChat = nil
-            tracks = cachedIDs.compactMap { knownTracks[$0] }.sorted { $0.date > $1.date }
+            tracks = downloadedTracks(from: cachedIDs)
         case nil:
             isGlobalSearch = false
             selectedChat = nil
@@ -620,7 +633,9 @@ final class AppModel {
         remoteHasMoreTracks = true
         visibleTrackLimit = Int(Self.chatMusicPageSize)
 
-        let localTracks = cachedTracks(in: chat).filter { matchesSearch($0, query: query) }
+        let allLocalTracks = cachedTracks(in: chat)
+        install(allLocalTracks)
+        let localTracks = allLocalTracks.filter { matchesSearch($0, query: query) }
         tracks = Array(localTracks.prefix(visibleTrackLimit))
         hasMoreTracks = localTracks.count > tracks.count
 
@@ -881,6 +896,10 @@ final class AppModel {
     }
 
     func play(_ track: Track, from list: [Track]? = nil) {
+        if player.track?.id == track.id {
+            if !player.isPlaying && !player.isLoading { player.play() }
+            return
+        }
         let source = list ?? tracks
         queue = source
         currentQueueIndex = source.firstIndex(where: { $0.id == track.id })
@@ -1532,6 +1551,49 @@ final class AppModel {
         }
     }
 
+    func applicationDidEnterBackground() {
+        pendingDownloadResumeIDs.formUnion(downloadTasks.keys)
+        persistPendingDownloadResumeIDs()
+    }
+
+    func applicationDidBecomeActive() async {
+        guard phase == .ready,
+              hasCredentials,
+              await telegram.hasAuthorizedSession() else { return }
+
+        for trackID in pendingDownloadResumeIDs.sorted() {
+            if cachedIDs.contains(trackID) {
+                clearPendingDownloadResumeID(trackID)
+                continue
+            }
+            guard let track = knownTracks[trackID],
+                  resumingDownloadIDs.insert(trackID).inserted else { continue }
+            let retryAfterFailure = downloadTasks[trackID] != nil
+            Task { [weak self] in
+                await self?.resumePendingDownload(track, retryAfterFailure: retryAfterFailure)
+            }
+        }
+    }
+
+    private func resumePendingDownload(_ track: Track, retryAfterFailure: Bool) async {
+        defer { resumingDownloadIDs.remove(track.id) }
+        do {
+            _ = try await cachedFile(for: track)
+        } catch is CancellationError {
+            return
+        } catch {
+            guard pendingDownloadResumeIDs.contains(track.id), !cachedIDs.contains(track.id), retryAfterFailure else { return }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            do {
+                _ = try await cachedFile(for: track)
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
+        }
+    }
+
     func isDownloadingAll(in playlist: MusicChat) -> Bool {
         downloadingPlaylistIDs.contains(playlist.id)
     }
@@ -1584,7 +1646,7 @@ final class AppModel {
         cacheBytes = await cache.totalBytes()
         reconcileSharedDownloads(with: actualCachedIDs)
         if selected == .downloads {
-            tracks = actualCachedIDs.compactMap { knownTracks[$0] }.sorted { $0.date > $1.date }
+            tracks = downloadedTracks(from: actualCachedIDs)
         }
     }
 
@@ -1676,6 +1738,7 @@ final class AppModel {
         Task {
             do {
                 try await cache.remove(track)
+                clearPendingDownloadResumeID(track.id)
                 cachedIDs.remove(track.id)
                 downloads[track.id] = DownloadStatus.none
                 cacheBytes = await cache.totalBytes()
@@ -1761,6 +1824,14 @@ final class AppModel {
             player.load(track, from: url)
         } else {
             guard !Task.isCancelled, player.track?.id == track.id else { return }
+            if cachedIDs.remove(track.id) != nil {
+                if downloads[track.id]?.isCached == true {
+                    downloads[track.id] = .none
+                }
+                if selected == .downloads { tracks.removeAll { $0.id == track.id } }
+                Task { [weak self] in await self?.refreshCacheUsage() }
+            }
+            guard !Task.isCancelled, player.track?.id == track.id else { return }
             let transfer = await progressiveTransfer(for: track)
             guard !Task.isCancelled, player.track?.id == track.id else { return }
             player.loadStreaming(track) { offset, length in
@@ -1781,8 +1852,7 @@ final class AppModel {
             } catch is CancellationError {
                 return
             } catch {
-                guard self.player.track?.id == track.id else { return }
-                self.errorMessage = UserFacingError.message(for: error)
+                return
             }
         }
     }
@@ -1814,13 +1884,18 @@ final class AppModel {
 
     private func cachedFile(for track: Track) async throws -> URL {
         if let url = await cache.localURL(for: track) {
+            clearPendingDownloadResumeID(track.id)
             cachedIDs.insert(track.id)
             downloads[track.id] = DownloadStatus(progress: 1, isCached: true)
             knownTracks[track.id] = track
             persistLibrary()
             return url
         }
-        if let existing = downloadTasks[track.id] { return try await existing.value }
+        if let existing = downloadTasks[track.id] {
+            let url = try await existing.value
+            clearPendingDownloadResumeID(track.id)
+            return url
+        }
         knownTracks[track.id] = track
         downloads[track.id] = DownloadStatus(
             progress: downloads[track.id]?.progress ?? 0,
@@ -1850,6 +1925,8 @@ final class AppModel {
             return destination
         }
         downloadTasks[track.id] = task
+        pendingDownloadResumeIDs.insert(track.id)
+        persistPendingDownloadResumeIDs()
         defer {
             downloadTasks.removeValue(forKey: track.id)
             activeTransfers.removeValue(forKey: track.id)
@@ -1857,6 +1934,7 @@ final class AppModel {
         do {
             let url = try await task.value
             cachedIDs.insert(track.id)
+            clearPendingDownloadResumeID(track.id)
             downloads[track.id] = DownloadStatus(progress: 1, isCached: true)
             knownTracks[track.id] = track
             await refreshCacheUsage()
@@ -1880,21 +1958,28 @@ final class AppModel {
         if let transfer = activeTransfers[track.id] { return transfer }
         let location = await cache.partialLocation(for: track)
         let telegram = telegram
-        let sourceChat = await musicSource(for: track)
-        // Another caller may have created the transfer while source lookup was
-        // suspended. Two actors must never write to the same partial file.
+        // Another caller may have created the transfer while resolving the
+        // cache location was suspended. Two actors must never write to the same partial file.
         if let transfer = activeTransfers[track.id] { return transfer }
         let transfer = ProgressiveAudioTransfer(
             trackID: track.id,
             fileSize: track.size,
             location: location
-        ) { offset, length in
-            try await telegram.stream(
-                track,
-                sourceChat: sourceChat,
-                offset: offset,
-                length: length
-            )
+        ) { offset, length, priority in
+            switch priority {
+            case .playback:
+                try await telegram.stream(
+                    track,
+                    offset: offset,
+                    length: length
+                )
+            case .background:
+                try await telegram.streamForDownload(
+                    track,
+                    offset: offset,
+                    length: length
+                )
+            }
         }
         activeTransfers[track.id] = transfer
         return transfer
@@ -2290,12 +2375,12 @@ final class AppModel {
         botSearchOperationID = operationID
         isBotSearching = true
         botSearchError = nil
-        startBotSearchRefresh(
-            operationID: operationID,
-            initialCommand: initialCommand
-        )
+        var waitForRefresh = false
+        if initialCommand != nil {
+            botSearchConversationStartID = nil
+        }
         defer {
-            if botSearchOperationID == operationID {
+            if botSearchOperationID == operationID, !waitForRefresh {
                 isBotSearching = false
             }
         }
@@ -2303,10 +2388,27 @@ final class AppModel {
         do {
             let values = try await operation()
             guard botSearchOperationID == operationID else { return }
+            if let initialCommand {
+                let sentCommand = values.last(where: {
+                    $0.isOutgoing
+                        && $0.text.trimmingCharacters(in: .whitespacesAndNewlines) == initialCommand
+                })
+                if let sentCommand {
+                    botSearchConversationStartID = sentCommand.id
+                } else if botSearchConversationStartID == nil,
+                          let firstIncomingID = values.filter({ !$0.isOutgoing }).map(\.id).min() {
+                    botSearchConversationStartID = firstIncomingID
+                }
+            }
             _ = applyBotSearchSnapshot(
                 values,
                 initialCommand: initialCommand,
                 operationID: operationID
+            )
+            waitForRefresh = !values.contains(where: { !$0.isOutgoing })
+            startBotSearchRefresh(
+                operationID: operationID,
+                initialCommand: initialCommand
             )
         } catch is CancellationError {
             // A newer bot action or account switch superseded this request.
@@ -2323,6 +2425,11 @@ final class AppModel {
         guard let config = activeBotSearchConfig else { return }
         botSearchRefreshTask = Task { [weak self] in
             guard let self else { return }
+            defer {
+                if botSearchOperationID == operationID {
+                    isBotSearching = false
+                }
+            }
             var sawIncomingResponse = false
             var stableReadsAfterResponse = 0
 
@@ -2386,12 +2493,25 @@ final class AppModel {
         } else {
             scoped = Array(values.suffix(40))
         }
-        guard scoped != botSearchMessages else { return false }
-        botSearchMessages = scoped
-        if scoped.contains(where: { !$0.isOutgoing }) {
+
+        var messagesByID = Dictionary(uniqueKeysWithValues: botSearchMessages.map { ($0.id, $0) })
+        for message in scoped {
+            if let existing = messagesByID[message.id],
+               existing.date > message.date || existing == message {
+                continue
+            }
+            messagesByID[message.id] = message
+        }
+        let merged = Array(messagesByID.values.sorted {
+            if $0.date == $1.date { return $0.id < $1.id }
+            return $0.date < $1.date
+        }.suffix(40))
+        guard merged != botSearchMessages else { return false }
+        botSearchMessages = merged
+        if merged.contains(where: { !$0.isOutgoing }) {
             botSearchError = nil
         }
-        install(scoped.compactMap(\.track))
+        install(merged.compactMap(\.track))
         return true
     }
 
@@ -2434,13 +2554,56 @@ final class AppModel {
     }
 
     private func install(_ values: [Track]) {
+        var cacheCandidates: [Track] = []
         for track in values {
+            if let remoteUniqueID = track.remoteUniqueID, !remoteUniqueID.isEmpty {
+                let legacyIDs = knownTracks.compactMap { entry -> String? in
+                    let (id, existing) = entry
+                    guard id != track.id,
+                          existing.chatID == track.chatID,
+                          existing.messageID == track.messageID,
+                          existing.remoteUniqueID == nil else { return nil }
+                    return id
+                }
+                for id in legacyIDs {
+                    guard var existing = knownTracks[id] else { continue }
+                    existing.remoteUniqueID = remoteUniqueID
+                    knownTracks[id] = existing
+                }
+            }
             knownTracks[track.id] = track
+            if !cachedIDs.contains(track.id), cacheStatusCheckedTrackIDs.insert(track.id).inserted {
+                cacheCandidates.append(track)
+            }
             voteStates[track.id] = VoteState(
                 count: track.upvoteCount ?? 0,
                 chosen: track.didUpvote ?? false
             )
         }
+        persistLibrary()
+        guard !cacheCandidates.isEmpty else { return }
+        Task { [weak self] in
+            await self?.reconcileCachedTracks(cacheCandidates)
+        }
+    }
+
+    private func reconcileCachedTracks(_ tracks: [Track]) async {
+        var recovered: [Track] = []
+        for track in tracks {
+            if await cache.localURL(for: track) != nil {
+                recovered.append(track)
+            }
+        }
+        guard !recovered.isEmpty else { return }
+        cachedIDs = await cache.cachedTrackIDs()
+        cacheBytes = await cache.totalBytes()
+        for track in recovered {
+            downloads[track.id] = DownloadStatus(progress: 1, isCached: true)
+            knownTracks[track.id] = track
+            sharedDownloadedTracks[track.id] = track
+        }
+        reconcileSharedDownloads(with: cachedIDs)
+        if selected == .downloads { self.tracks = downloadedTracks(from: cachedIDs) }
         persistLibrary()
     }
 
@@ -2489,7 +2652,33 @@ final class AppModel {
 
     private func deduplicated(_ values: [Track]) -> [Track] {
         var seen: Set<String> = []
-        return values.filter { seen.insert($0.id).inserted }
+        return values.filter { track in
+            let remoteUniqueID = track.remoteUniqueID ?? knownTracks[track.id]?.remoteUniqueID
+            let key = remoteUniqueID.map { "remote:\($0)" } ?? track.id
+            return seen.insert(key).inserted
+        }
+    }
+
+    private func downloadedTracks(from trackIDs: Set<String>) -> [Track] {
+        let values = trackIDs.compactMap { knownTracks[$0] }.sorted { $0.date > $1.date }
+        var result: [Track] = []
+        for track in values where !result.contains(where: { sameDownloadedTrack($0, track) }) {
+            result.append(track)
+        }
+        return result
+    }
+
+    private func sameDownloadedTrack(_ lhs: Track, _ rhs: Track) -> Bool {
+        if let lhsID = lhs.remoteUniqueID, !lhsID.isEmpty,
+           let rhsID = rhs.remoteUniqueID, !rhsID.isEmpty,
+           lhsID == rhsID {
+            return true
+        }
+        guard !lhs.artist.isEmpty, !rhs.artist.isEmpty,
+              lhs.duration > 0, rhs.duration > 0,
+              abs(lhs.duration - rhs.duration) <= 2 else { return false }
+        return normalizedListenTogetherText(lhs.displayTitle) == normalizedListenTogetherText(rhs.displayTitle)
+            && normalizedListenTogetherText(lhs.artist) == normalizedListenTogetherText(rhs.artist)
     }
 
     private func cachedTracks(in chat: MusicChat) -> [Track] {
@@ -2504,7 +2693,7 @@ final class AppModel {
                     return lhs.date > rhs.date
                 }
         }
-        return arranged(values, in: chat)
+        return arranged(deduplicated(values), in: chat)
     }
 
     private func accountAvatarPeer(for account: TelegramAccount) -> MusicChat {
@@ -2856,7 +3045,7 @@ final class AppModel {
                 accessHash: 1,
                 fileReference: Data(),
                 dcID: 2,
-                messageID: Int32(500 - index),
+                messageID: Int64(500 - index),
                 chatID: demoTrackChatID,
                 title: item.0,
                 artist: item.1,
@@ -2926,7 +3115,7 @@ final class AppModel {
             trackID: track.id,
             fileSize: track.size,
             location: location
-        ) { _, length in
+        ) { _, length, _ in
             Data(repeating: 0x54, count: Int(length))
         }
         _ = try? await transfer.bytes(at: 0, length: 512 * 1_024)
@@ -3084,6 +3273,10 @@ final class AppModel {
 
     private func restoreLibrary() {
         let defaults = UserDefaults.standard
+        cacheStatusCheckedTrackIDs.removeAll()
+        pendingDownloadResumeIDs = Set(
+            defaults.stringArray(forKey: accountStorageKey("downloads.pendingResume")) ?? []
+        )
         playlistFolderName = defaults.string(forKey: accountStorageKey("playlist.folderName"))
             .flatMap(PlaylistFolderConfiguration.normalizedName) ?? PlaylistFolderConfiguration.defaultName
         favorites = []
@@ -3170,6 +3363,18 @@ final class AppModel {
             Array(savedChatIDs),
             forKey: accountStorageKey("library.savedChats")
         )
+    }
+
+    private func persistPendingDownloadResumeIDs() {
+        UserDefaults.standard.set(
+            pendingDownloadResumeIDs.sorted(),
+            forKey: accountStorageKey("downloads.pendingResume")
+        )
+    }
+
+    private func clearPendingDownloadResumeID(_ trackID: String) {
+        guard pendingDownloadResumeIDs.remove(trackID) != nil else { return }
+        persistPendingDownloadResumeIDs()
     }
 
     private var localMirrorAccountID: String {

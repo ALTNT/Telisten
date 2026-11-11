@@ -32,22 +32,28 @@ private struct PartialDownloadState: Codable {
 
 actor ProgressiveAudioTransfer {
     private static let chunkSize: Int64 = 512 * 1_024
+    private static let providerChunkSize: Int64 = 1_024 * 1_024
     private static let maxConcurrentChunks = 4
+
+    private struct RangeRequest {
+        var id: UUID
+        var task: Task<Data, Error>
+    }
 
     private let fileSize: Int64
     private let trackID: String
-    private let provider: AudioByteProvider
+    private let provider: ProgressiveAudioByteProvider
     private var fileURL: URL
     private let stateURL: URL
     private var handle: FileHandle?
     private var completedOffsets: Set<Int64> = []
-    private var requests: [Int64: Task<Data, Error>] = [:]
+    private var requests: [Int64: RangeRequest] = [:]
 
     init(
         trackID: String,
         fileSize: Int64,
         location: PartialCacheLocation,
-        provider: @escaping AudioByteProvider
+        provider: @escaping ProgressiveAudioByteProvider
     ) {
         self.trackID = trackID
         self.fileSize = fileSize
@@ -83,7 +89,7 @@ actor ProgressiveAudioTransfer {
         while offset < end {
             try Task.checkCancellation()
             let chunkOffset = offset - (offset % Self.chunkSize)
-            let chunk = try await chunk(at: chunkOffset)
+            let chunk = try await chunk(at: chunkOffset, priority: .playback)
             let start = Int(offset - chunkOffset)
             guard start < chunk.count else { throw TransferError.incompleteData }
             let count = min(Int(end - offset), chunk.count - start)
@@ -99,10 +105,9 @@ actor ProgressiveAudioTransfer {
             return
         }
 
-        // Keep a small bounded window of requests in flight. Telegram file
-        // chunks are independent, and the actor still serializes cache writes,
-        // so this improves throughput without risking concurrent FileHandle
-        // access or an unbounded task queue.
+        // Keep a small bounded window of cache blocks in flight. Adjacent
+        // blocks share a larger Telegram range request while cache writes stay
+        // serialized by this actor.
         var nextOffset: Int64 = 0
         var completedBytes: Int64 = 0
         var activeTasks = 0
@@ -114,7 +119,7 @@ actor ProgressiveAudioTransfer {
                 nextOffset += Self.chunkSize
                 activeTasks += 1
                 group.addTask {
-                    let data = try await self.chunk(at: offset)
+                    let data = try await self.chunk(at: offset, priority: .background)
                     guard !data.isEmpty else { throw TransferError.incompleteData }
                     return Int64(data.count)
                 }
@@ -141,42 +146,63 @@ actor ProgressiveAudioTransfer {
         try? FileManager.default.removeItem(at: stateURL)
     }
 
-    private func chunk(at offset: Int64) async throws -> Data {
+    private func chunk(at offset: Int64, priority: AudioTransferPriority) async throws -> Data {
         if completedOffsets.contains(offset) {
             return try readChunk(at: offset)
         }
-        if let request = requests[offset] {
-            let data = try await request.value
-            return try storeFetched(data, at: offset)
-        }
 
-        let provider = provider
-        let length = Int32(min(Self.chunkSize, fileSize - offset))
-        let request = Task<Data, Error> {
-            try await provider(offset, length)
+        let requestOffset = offset - (offset % Self.providerChunkSize)
+        let request: RangeRequest
+        if let existing = requests[requestOffset] {
+            request = existing
+        } else {
+            let provider = provider
+            let length = Int32(min(Self.providerChunkSize, fileSize - requestOffset))
+            let created = RangeRequest(
+                id: UUID(),
+                task: Task<Data, Error> {
+                    try await provider(requestOffset, length, priority)
+                }
+            )
+            requests[requestOffset] = created
+            request = created
         }
-        requests[offset] = request
 
         do {
-            let data = try await request.value
-            requests.removeValue(forKey: offset)
-            return try storeFetched(data, at: offset)
+            let data = try await request.task.value
+            try storeFetched(data, at: requestOffset)
+            if requests[requestOffset]?.id == request.id {
+                requests.removeValue(forKey: requestOffset)
+            }
+            return try readChunk(at: offset)
         } catch {
-            requests.removeValue(forKey: offset)
+            if requests[requestOffset]?.id == request.id {
+                requests.removeValue(forKey: requestOffset)
+            }
             throw error
         }
     }
 
-    private func storeFetched(_ data: Data, at offset: Int64) throws -> Data {
-        if completedOffsets.contains(offset) {
-            return try readChunk(at: offset)
+    private func storeFetched(_ data: Data, at rangeOffset: Int64) throws {
+        let expectedRangeLength = Int(min(Self.providerChunkSize, fileSize - rangeOffset))
+        guard data.count == expectedRangeLength else { throw TransferError.incompleteData }
+
+        var blockOffset = rangeOffset
+        var dataOffset = 0
+        var wroteBlock = false
+        while dataOffset < data.count {
+            let expectedLength = Int(min(Self.chunkSize, fileSize - blockOffset))
+            let endOffset = dataOffset + expectedLength
+            guard endOffset <= data.count else { throw TransferError.incompleteData }
+            if !completedOffsets.contains(blockOffset) {
+                try write(data.subdata(in: dataOffset..<endOffset), at: blockOffset)
+                completedOffsets.insert(blockOffset)
+                wroteBlock = true
+            }
+            blockOffset += Self.chunkSize
+            dataOffset = endOffset
         }
-        let expectedLength = Int(min(Self.chunkSize, fileSize - offset))
-        guard data.count == expectedLength else { throw TransferError.incompleteData }
-        try write(data, at: offset)
-        completedOffsets.insert(offset)
-        persistState()
-        return data
+        if wroteBlock { persistState() }
     }
 
     private func prepareFile() throws -> FileHandle {
@@ -352,20 +378,57 @@ actor CacheStore {
     }
 
     func localURL(for track: Track) -> URL? {
-        guard var entry = entries[track.id] else { return nil }
+        let entryID = entries[track.id] == nil ? matchingEntryID(for: track) : track.id
+        guard let entryID, var entry = entries[entryID] else { return nil }
         let url = root.appending(path: entry.fileName)
         guard let size = fileSize(at: url), size > 0, size == entry.byteCount,
               track.size <= 0 || size == track.size else {
-            entries.removeValue(forKey: track.id)
-            persist()
+            if entryID == track.id {
+                entries.removeValue(forKey: track.id)
+                persist()
+            }
             return nil
         }
+        if entryID != track.id {
+            entries.removeValue(forKey: entryID)
+            try? FileManager.default.removeItem(at: recordURL(for: entryID))
+        }
+        entry.trackID = track.id
         entry.lastAccess = .now
         entry.track = track
         entries[track.id] = entry
         try? persistRecord(entry)
         persist()
         return url
+    }
+
+    private func matchingEntryID(for track: Track) -> String? {
+        let candidates = entries.values.filter { entry in
+            guard let cachedTrack = entry.track else { return false }
+            if let cachedID = cachedTrack.remoteUniqueID, !cachedID.isEmpty,
+               let currentID = track.remoteUniqueID, !currentID.isEmpty {
+                return cachedID == currentID
+            }
+            if cachedTrack.messageID > 0, track.messageID > 0,
+               cachedTrack.chatID == track.chatID,
+               cachedTrack.messageID == track.messageID {
+                return true
+            }
+            guard entry.byteCount == track.size,
+                  !cachedTrack.artist.isEmpty, !track.artist.isEmpty,
+                  cachedTrack.duration > 0, track.duration > 0,
+                  abs(cachedTrack.duration - track.duration) <= 2 else { return false }
+            return normalizedTrackText(cachedTrack.displayTitle) == normalizedTrackText(track.displayTitle)
+                && normalizedTrackText(cachedTrack.artist) == normalizedTrackText(track.artist)
+        }
+        return candidates.first?.trackID
+    }
+
+    private func normalizedTrackText(_ value: String) -> String {
+        value
+            .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
+            .lowercased()
+            .filter { $0.isLetter || $0.isNumber }
     }
 
     func partialLocation(for track: Track) -> PartialCacheLocation {

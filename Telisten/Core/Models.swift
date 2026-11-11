@@ -77,7 +77,7 @@ struct SearchBotConfig: Identifiable, Codable, Hashable, Sendable {
 
 enum BotSearchButtonAction: Hashable, Sendable {
     case sendText(String)
-    case callback(messageID: Int32, data: Data)
+    case callback(messageID: Int64, data: Data)
     case openURL(URL)
     case unsupported
 }
@@ -89,7 +89,7 @@ struct BotSearchButton: Identifiable, Hashable, Sendable {
 }
 
 struct BotSearchMessage: Identifiable, Hashable, Sendable {
-    var id: Int32
+    var id: Int64
     var isOutgoing: Bool
     var text: String
     var date: Date
@@ -103,7 +103,7 @@ struct TelegramLyricsAttachment: Identifiable, Hashable, Sendable {
     var accessHash: Int64
     var fileReference: Data
     var dcID: Int32
-    var messageID: Int32
+    var messageID: Int64
     var chatID: String
     var fileName: String
     var mimeType: String
@@ -149,11 +149,15 @@ struct MusicChat: Identifiable, Codable, Hashable, Sendable {
 
 struct Track: Identifiable, Codable, Hashable, Sendable {
     var id: String { "\(dcID):\(documentID)" }
+    var deduplicationID: String {
+        guard let remoteUniqueID, !remoteUniqueID.isEmpty else { return id }
+        return "remote:\(remoteUniqueID)"
+    }
     var documentID: Int64
     var accessHash: Int64
     var fileReference: Data
     var dcID: Int32
-    var messageID: Int32
+    var messageID: Int64
     var chatID: String
     var title: String
     var artist: String
@@ -166,6 +170,7 @@ struct Track: Identifiable, Codable, Hashable, Sendable {
     var didUpvote: Bool?
     var artworkThumbSize: String? = nil
     var artworkPreview: Data? = nil
+    var remoteUniqueID: String? = nil
 
     var displayTitle: String {
         title.isEmpty ? fileName.deletingPathExtension : title

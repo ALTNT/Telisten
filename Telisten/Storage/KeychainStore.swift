@@ -1,10 +1,8 @@
 import Foundation
-import NIOMTProtoEncryption
 import Security
 
 final class KeychainStore: @unchecked Sendable {
     private static let defaultService = "ad.neko.player"
-    private static let primaryDCs = (1...5).map(Int32.init)
     private static let accessGroupPrefixInfoKey = "TelistenKeychainAccessGroupPrefix"
 
     private let service: String
@@ -23,22 +21,14 @@ final class KeychainStore: @unchecked Sendable {
             guard !trimmed.isEmpty, !trimmed.contains("$(") else { return nil }
             return trimmed.hasSuffix(".") ? trimmed : "\(trimmed)."
         }
-        purgeSynchronizedSessionArtifacts()
     }
 
     private enum AccountKey {
         static let searchBots = "search-bots.v1"
         static let accountRegistry = "telegram.accounts.v1"
-
-        static func primaryDC(accountID: String) -> String {
-            "mtproto.primary-dc.\(accountID)"
+        static func tdlibDatabaseKey(accountID: String) -> String {
+            "tdlib.database-key.\(accountID)"
         }
-    }
-
-    private struct StoredSession: Codable {
-        var authKey: Data
-        var serverSalt: Int64
-        var expiresAt: Int32
     }
 
     private struct StoredAccountRegistry: Codable {
@@ -57,148 +47,39 @@ final class KeychainStore: @unchecked Sendable {
         var encoded: Data
     }
 
-    func availableSessionDCs(accountID: String) -> [Int32] {
-        withLock { availableSessionDCsUnlocked(accountID: accountID) }
-    }
-
     func availableSessionAccountIDs() -> [String] {
-        withLock {
-            let accountIDs = Set(sessionItemAccounts().compactMap(sessionAccountID(from:)))
-            return accountIDs
-                .filter { !availableSessionDCsUnlocked(accountID: $0).isEmpty }
-                .sorted()
-        }
+        UserDefaults.standard.stringArray(forKey: "tdlib.authorizedAccountIDs") ?? []
     }
 
     @discardableResult
-    func saveSession(_ keys: MTProtoSessionKeys, dcID: Int32, accountID: String) -> Bool {
-        let value = StoredSession(authKey: keys.authKey, serverSalt: keys.serverSalt, expiresAt: keys.expiresAt)
-        guard let data = try? JSONEncoder().encode(value) else { return false }
-        return withLock {
-            let account = sessionKey(dcID: dcID, accountID: accountID)
-            let saved = saveDeviceLocal(data, account: account)
-            deleteSynchronizedSessionArtifact(account: account)
-            return saved
-        }
-    }
-
-    func loadSession(dcID: Int32, accountID: String) -> MTProtoStoredSession? {
+    func setTDLibAccount(_ accountID: String, authorized: Bool) -> Bool {
         withLock {
-            guard let data = loadDeviceLocal(account: sessionKey(dcID: dcID, accountID: accountID)),
-                  let value = decodedSession(data) else { return nil }
-            return MTProtoStoredSession(
-                authKey: value.authKey,
-                serverSalt: value.serverSalt,
-                expiresAt: value.expiresAt
-            )
-        }
-    }
-
-    func clearSessions(accountID: String) {
-        withLock {
-            for dcID in 1...5 {
-                for signedDCID in [Int32(dcID), Int32(-dcID)] {
-                    let account = sessionKey(dcID: signedDCID, accountID: accountID)
-                    deleteDeviceLocal(account: account)
-                    deleteSynchronizedSessionArtifact(account: account)
-                }
+            var accountIDs = Set(UserDefaults.standard.stringArray(forKey: "tdlib.authorizedAccountIDs") ?? [])
+            if authorized {
+                accountIDs.insert(accountID)
+            } else {
+                accountIDs.remove(accountID)
             }
-            let primaryDCAccount = AccountKey.primaryDC(accountID: accountID)
-            deleteDeviceLocal(account: primaryDCAccount)
-            deleteSynchronizedSessionArtifact(account: primaryDCAccount)
+            UserDefaults.standard.set(accountIDs.sorted(), forKey: "tdlib.authorizedAccountIDs")
+            return true
         }
     }
 
-    func deleteSession(dcID: Int32, accountID: String) {
+    func loadOrCreateTDLibDatabaseKey(accountID: String) -> Data? {
         withLock {
-            let account = sessionKey(dcID: dcID, accountID: accountID)
-            deleteDeviceLocal(account: account)
-            deleteSynchronizedSessionArtifact(account: account)
+            let account = AccountKey.tdlibDatabaseKey(accountID: accountID)
+            if let data = loadDeviceLocal(account: account), data.count == 32 { return data }
+            let data = Data((0..<32).map { _ in UInt8.random(in: .min ... .max) })
+            return saveDeviceLocal(data, account: account) ? data : nil
         }
     }
 
-    @discardableResult
-    func savePrimaryDC(_ dcID: Int32, accountID: String) -> Bool {
-        guard let data = try? JSONEncoder().encode(dcID) else { return false }
-        return withLock {
-            let account = AccountKey.primaryDC(accountID: accountID)
-            let saved = saveDeviceLocal(data, account: account)
-            deleteSynchronizedSessionArtifact(account: account)
-            return saved
-        }
-    }
-
-    func loadPrimaryDC(accountID: String) -> Int32? {
-        withLock {
-            guard let data = loadDeviceLocal(account: AccountKey.primaryDC(accountID: accountID)) else {
-                return nil
-            }
-            return try? JSONDecoder().decode(Int32.self, from: data)
-        }
-    }
-
-    /// Moves every device-local MTProto session and the primary-DC marker to a
-    /// different account identifier. Synchronizable Keychain items are never used
-    /// as session input; stale copies from older builds are purged after the move.
-    ///
-    /// Keychain has no multi-item transaction API, so this uses a recoverable
-    /// two-phase move: replace and verify the destination first, then remove the
-    /// source. Any failure restores the snapshots while retaining at least one
-    /// complete copy of the source state.
-    @discardableResult
-    func moveDeviceLocalSessions(fromAccountID sourceAccountID: String, toAccountID destinationAccountID: String) -> Bool {
-        guard !sourceAccountID.isEmpty, !destinationAccountID.isEmpty else { return false }
+    func copyTDLibDatabaseKey(from sourceAccountID: String, to destinationAccountID: String) -> Bool {
         guard sourceAccountID != destinationAccountID else { return true }
-
         return withLock {
-            let sourceKeys = deviceLocalAccountItemKeys(accountID: sourceAccountID)
-            let destinationKeys = deviceLocalAccountItemKeys(accountID: destinationAccountID)
-
-            let sourceSnapshot: [Data?]
-            let destinationSnapshot: [Data?]
-            do {
-                sourceSnapshot = try deviceLocalSnapshot(keys: sourceKeys)
-                destinationSnapshot = try deviceLocalSnapshot(keys: destinationKeys)
-            } catch {
-                return false
-            }
-            guard sourceSnapshot.contains(where: { $0 != nil }) else { return false }
-
-            do {
-                try applyDeviceLocalSnapshot(sourceSnapshot, keys: destinationKeys)
-                guard try deviceLocalSnapshot(keys: destinationKeys) == sourceSnapshot else {
-                    throw CocoaError(.fileWriteUnknown)
-                }
-            } catch {
-                try? applyDeviceLocalSnapshot(destinationSnapshot, keys: destinationKeys)
-                return false
-            }
-
-            do {
-                try applyDeviceLocalSnapshot(Array(repeating: nil, count: sourceKeys.count), keys: sourceKeys)
-                guard try deviceLocalSnapshot(keys: sourceKeys).allSatisfy({ $0 == nil }) else {
-                    throw CocoaError(.fileWriteUnknown)
-                }
-                for key in sourceKeys + destinationKeys {
-                    deleteSynchronizedSessionArtifact(account: key)
-                }
-                return true
-            } catch {
-                // Restore the source first. Only roll the destination back once
-                // that succeeds, so a failed recovery can never discard the last
-                // complete copy of the session state.
-                do {
-                    try applyDeviceLocalSnapshot(sourceSnapshot, keys: sourceKeys)
-                    guard try deviceLocalSnapshot(keys: sourceKeys) == sourceSnapshot else {
-                        return false
-                    }
-                    try? applyDeviceLocalSnapshot(destinationSnapshot, keys: destinationKeys)
-                } catch {
-                    // The verified destination still contains the complete source
-                    // snapshot and remains recoverable by a later retry.
-                }
-                return false
-            }
+            guard let data = loadDeviceLocal(account: AccountKey.tdlibDatabaseKey(accountID: sourceAccountID)),
+                  data.count == 32 else { return false }
+            return saveDeviceLocal(data, account: AccountKey.tdlibDatabaseKey(accountID: destinationAccountID))
         }
     }
 
@@ -239,115 +120,8 @@ final class KeychainStore: @unchecked Sendable {
         }
     }
 
-    private func sessionKey(dcID: Int32, accountID: String) -> String {
-        accountID == "legacy"
-            ? "mtproto.session.\(dcID)"
-            : "mtproto.session.\(accountID).\(dcID)"
-    }
-
-    private func availableSessionDCsUnlocked(accountID: String) -> [Int32] {
-        Self.primaryDCs.filter { dcID in
-            let account = sessionKey(dcID: dcID, accountID: accountID)
-            return decodedSession(loadDeviceLocal(account: account)) != nil
-        }
-    }
-
-    private func deviceLocalAccountItemKeys(accountID: String) -> [String] {
-        let sessionKeys = Self.primaryDCs.flatMap { dcID in
-            [
-                sessionKey(dcID: dcID, accountID: accountID),
-                sessionKey(dcID: -dcID, accountID: accountID)
-            ]
-        }
-        return sessionKeys + [AccountKey.primaryDC(accountID: accountID)]
-    }
-
-    private func deviceLocalSnapshot(keys: [String]) throws -> [Data?] {
-        try keys.map { key in
-            try loadThrowing(
-                account: key,
-                synchronizable: false,
-                service: service
-            )
-        }
-    }
-
-    private func applyDeviceLocalSnapshot(_ snapshot: [Data?], keys: [String]) throws {
-        guard snapshot.count == keys.count else {
-            throw CocoaError(.coderInvalidValue)
-        }
-        for (data, key) in zip(snapshot, keys) {
-            if let data {
-                try save(data, account: key, synchronizable: false, service: service)
-            } else {
-                try deleteThrowing(account: key, synchronizable: false, service: service)
-            }
-        }
-    }
-
-    private func sessionItemAccounts() -> [String] {
-        itemAccounts(synchronizable: false)
-    }
-
-    private func purgeSynchronizedSessionArtifacts() {
-        withLock {
-            for account in itemAccounts(synchronizable: true)
-                where account.hasPrefix("mtproto.session.")
-                    || account.hasPrefix("mtproto.primary-dc.") {
-                deleteSynchronizedSessionArtifact(account: account)
-            }
-        }
-    }
-
-    private func itemAccounts(synchronizable: Bool) -> [String] {
-        var result: CFTypeRef?
-        var query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrService: service,
-            kSecAttrSynchronizable: synchronizable ? kCFBooleanTrue as Any : kCFBooleanFalse as Any,
-            kSecReturnAttributes: true,
-            kSecMatchLimit: kSecMatchLimitAll
-        ]
-        addAccessOptions(to: &query, service: service)
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else {
-            return []
-        }
-        let items: [[CFString: Any]]
-        if let many = result as? [[CFString: Any]] {
-            items = many
-        } else if let one = result as? [CFString: Any] {
-            items = [one]
-        } else {
-            return []
-        }
-        return items.compactMap { $0[kSecAttrAccount] as? String }
-    }
-
-    private func sessionAccountID(from itemAccount: String) -> String? {
-        let prefix = "mtproto.session."
-        guard itemAccount.hasPrefix(prefix) else { return nil }
-        let remainder = String(itemAccount.dropFirst(prefix.count))
-        if let dcID = Int32(remainder), Self.primaryDCs.contains(dcID) {
-            return "legacy"
-        }
-        guard let separator = remainder.lastIndex(of: "."),
-              let dcID = Int32(remainder[remainder.index(after: separator)...]),
-              Self.primaryDCs.contains(dcID) else { return nil }
-        let accountID = String(remainder[..<separator])
-        return accountID.isEmpty ? nil : accountID
-    }
-
-    private func decodedSession(_ data: Data?) -> StoredSession? {
-        guard let data,
-              let value = try? JSONDecoder().decode(StoredSession.self, from: data),
-              value.authKey.count == 256 else { return nil }
-        return value
-    }
-
     /// Account descriptors and user configuration may follow the user through
-    /// iCloud Keychain. Raw MTProto session keys deliberately use the device-local
-    /// helpers instead: reusing one auth key on two active devices can make
-    /// Telegram invalidate it as duplicated.
+    /// iCloud Keychain. TDLib's database encryption key remains device-local.
     @discardableResult
     private func saveSynced(_ data: Data, account: String) -> Bool {
         guard let encoded = try? JSONEncoder().encode(
@@ -421,14 +195,6 @@ final class KeychainStore: @unchecked Sendable {
 
     private func loadDeviceLocal(account: String) -> Data? {
         load(account: account, synchronizable: false, service: service)
-    }
-
-    private func deleteDeviceLocal(account: String) {
-        delete(account: account, synchronizable: false, service: service)
-    }
-
-    private func deleteSynchronizedSessionArtifact(account: String) {
-        delete(account: account, synchronizable: true, service: service)
     }
 
     private func save(

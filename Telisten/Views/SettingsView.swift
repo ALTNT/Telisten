@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var lyricsServerDraft = ""
     @State private var lyricsServerError: String?
@@ -116,7 +116,7 @@ struct SettingsView: View {
                         }
                     }
                 } footer: {
-                    Text("Signing out removes this account's MTProto session keys from Keychain. Other accounts stay signed in.")
+                    Text("Signing out removes this account's Telegram session data. Other accounts stay signed in.")
                 }
             }
             .formStyle(.grouped)
@@ -230,7 +230,7 @@ struct SettingsView: View {
 }
 
 private struct SearchBotEditorView: View {
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
     private let id: UUID
     private let isNew: Bool

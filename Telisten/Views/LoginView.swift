@@ -6,7 +6,7 @@ import AppKit
 #endif
 
 struct LoginView: View {
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
     @State private var phone = ""
     @State private var code = ""
     @State private var password = ""

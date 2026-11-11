@@ -1,17 +1,16 @@
 @preconcurrency import AVFoundation
+import Combine
 import Foundation
 @preconcurrency import MediaPlayer
-import Observation
 
 @MainActor
-@Observable
-final class AudioPlayer {
-    private(set) var track: Track?
-    private(set) var isPlaying = false
-    private(set) var isLoading = false
-    private(set) var currentTime: TimeInterval = 0
-    private(set) var duration: TimeInterval = 0
-    var volume: Float = 1 {
+final class AudioPlayer: ObservableObject {
+    @Published private(set) var track: Track?
+    @Published private(set) var isPlaying = false
+    @Published private(set) var isLoading = false
+    @Published private(set) var currentTime: TimeInterval = 0
+    @Published private(set) var duration: TimeInterval = 0
+    @Published var volume: Float = 1 {
         didSet {
             player.volume = volume
             if volume > 0.001 { volumeBeforeMute = volume }

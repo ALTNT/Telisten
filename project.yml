@@ -2,19 +2,16 @@ name: Telisten
 options:
   bundleIdPrefix: ad.neko
   deploymentTarget:
-    iOS: "18.0"
+    iOS: "16.3"
     macOS: "15.0"
     visionOS: "2.0"
-  xcodeVersion: "26.0"
+  xcodeVersion: "16.2"
   groupSortPosition: top
   generateEmptyDirectories: true
 packages:
-  SwiftMTProto:
-    url: https://github.com/UInt8Co/swift-mtproto.git
-    from: 1.0.0
-  SwiftNIOMTProto:
-    url: https://github.com/UInt8Co/swift-nio-mtproto.git
-    from: 1.0.0
+  TDLibKit:
+    url: https://github.com/Swiftgram/TDLibKit.git
+    exactVersion: 1.5.2-tdlib-1.8.69-6126ecae
   HPRTMP:
     url: https://github.com/huiping192/HPRTMP.git
     exactVersion: 0.0.3
@@ -43,18 +40,9 @@ targetTemplates:
           - Info-macOS.plist
           - Info-visionOS.plist
           - VisionAssets.xcassets
-      - path: Generated/TelegramAPI
     dependencies:
-      - package: SwiftMTProto
-        product: TLCoding
-      - package: SwiftMTProto
-        product: MTProtoBaseSchema
-      - package: SwiftMTProto
-        product: MTProtoCrypto
-      - package: SwiftNIOMTProto
-        product: MTProtoClientKit
-      - package: SwiftNIOMTProto
-        product: NIOMTProtoEncryption
+      - package: TDLibKit
+        product: TDLibKit
       - package: HPRTMP
         product: HPRTMP
     settings:
@@ -76,6 +64,23 @@ targets:
     info:
       path: Telisten/Info-iOS.plist
       properties:
+        CFBundleIcons:
+          CFBundlePrimaryIcon:
+            CFBundleIconFiles:
+              - Icon20
+              - Icon29
+              - Icon40
+              - Icon60
+            UIPrerenderedIcon: false
+        CFBundleIcons~ipad:
+          CFBundlePrimaryIcon:
+            CFBundleIconFiles:
+              - Icon20
+              - Icon29
+              - Icon40
+              - Icon76
+              - Icon83.5
+            UIPrerenderedIcon: false
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false

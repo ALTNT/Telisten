@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ListenTogetherContactPicker: View {
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
     let session: ListenTogetherSession
     @Environment(\.dismiss) private var dismiss
     @State private var contacts: [MusicChat] = []
@@ -21,15 +21,23 @@ struct ListenTogetherContactPicker: View {
                             .foregroundStyle(.secondary)
                     }
                 } else if filteredContacts.isEmpty {
-                    ContentUnavailableView(
-                        query.isEmpty ? "No Telegram contacts" : "No matching contacts",
-                        systemImage: "person.2.slash",
-                        description: Text(
+                    VStack(spacing: 8) {
+                        Image(systemName: "person.2.slash")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                        Text(query.isEmpty ? "No Telegram contacts" : "No matching contacts")
+                            .font(.headline)
+                        Text(
                             query.isEmpty
                                 ? "Contacts saved in Telegram will appear here."
                                 : "Try a different name or username."
                         )
-                    )
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 160)
+                    .padding(.vertical, 20)
                     .listRowSeparator(.hidden)
                 } else {
                     ForEach(filteredContacts) { contact in
@@ -43,17 +51,7 @@ struct ListenTogetherContactPicker: View {
             #if os(iOS) || os(visionOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(selection.isEmpty ? "Invite" : "Invite \(selection.count)") {
-                        Task { await inviteSelectedContacts() }
-                    }
-                    .disabled(selection.isEmpty || isInviting)
-                }
-            }
+            .toolbar(content: { contactPickerToolbar })
             .overlay {
                 if isInviting {
                     ProgressView("Inviting…")
@@ -70,6 +68,19 @@ struct ListenTogetherContactPicker: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(localizedUI(errorMessage ?? "Telegram could not complete the invitation."))
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var contactPickerToolbar: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            Button("Cancel") { dismiss() }
+        }
+        ToolbarItem(placement: .confirmationAction) {
+            Button(selection.isEmpty ? "Invite" : "Invite \(selection.count)") {
+                Task { await inviteSelectedContacts() }
+            }
+            .disabled(selection.isEmpty || isInviting)
         }
     }
 

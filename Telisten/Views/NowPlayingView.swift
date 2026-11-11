@@ -7,7 +7,7 @@ struct NowPlayingView: View {
         var id: Self { self }
     }
 
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var section: Section = .lyrics
     #if os(iOS)
@@ -314,7 +314,7 @@ struct NowPlayingView: View {
 }
 
 private struct PlaybackQueue: View {
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
 
     var body: some View {
         ScrollView {
@@ -351,7 +351,7 @@ private struct PlaybackQueue: View {
 }
 
 private struct PlaybackTimeline: View {
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
 
     var body: some View {
         VStack(spacing: 6) {
@@ -372,7 +372,7 @@ private struct PlaybackTimeline: View {
 }
 
 private struct PlaybackControls: View {
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
     var compact = false
 
     var body: some View {
@@ -431,7 +431,6 @@ private struct PlaybackControls: View {
             }
         } label: {
             Image(systemName: model.playbackMode.symbolName)
-                .contentTransition(.symbolEffect(.replace))
                 .frame(width: 44, height: 44)
         }
         .menuIndicator(.hidden)
@@ -446,7 +445,7 @@ private struct PlaybackControls: View {
 /// A tabletop separates content for viewing from controls for touching. Both
 /// regions share the existing player; changing the layout never restarts audio.
 struct TabletopPlayerView<Collection: View>: View {
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
     let upperRegionHeight: CGFloat
     @ViewBuilder var collection: () -> Collection
     @State private var showsQueue = false
@@ -571,7 +570,7 @@ private struct TabletopActionStyle: ButtonStyle {
 #endif
 
 struct DesktopLyricsView: View {
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
 
     var body: some View {
         LyricsPanel(model: model, style: .desktop)
@@ -593,7 +592,7 @@ struct LyricsPanel: View {
         case desktop
     }
 
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
     var style: Style = .player
     @State private var isShowingMatchChooser = false
 
@@ -615,22 +614,37 @@ struct LyricsPanel: View {
                     lyricsScroll(lyrics)
                 }
             case .unavailable:
-                ContentUnavailableView(
+                lyricsPlaceholder(
                     "No lyrics found",
-                    systemImage: "quote.bubble",
-                    description: Text("This track may be instrumental or missing from LRCLIB.")
+                    symbol: "quote.bubble",
+                    description: "This track may be instrumental or missing from LRCLIB."
                 )
             case let .failed(message):
-                ContentUnavailableView(
+                lyricsPlaceholder(
                     "Lyrics unavailable",
-                    systemImage: "wifi.exclamationmark",
-                    description: Text(localizedUI(message))
+                    symbol: "wifi.exclamationmark",
+                    description: localizedUI(message)
                 )
             }
         }
         .padding(.horizontal, style == .desktop ? 42 : (style == .tabletop ? 0 : 18))
         .padding(.top, style == .desktop ? 10 : 0)
         .padding(.bottom, style == .desktop || style == .tabletop ? 0 : 18)
+    }
+
+    private func lyricsPlaceholder(_ title: String, symbol: String, description: String) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.system(size: 30))
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.headline)
+            Text(description)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, minHeight: 160)
     }
 
     private func lyricsChooser(selected: TrackLyrics) -> some View {
@@ -774,19 +788,23 @@ struct LyricsPanel: View {
                         .foregroundStyle(Color.telistenAccent)
                         .padding(.top, 12)
                 }
-                .padding(style == .desktop ? 28 : (style == .tabletop ? 12 : 20))
+                .padding(.horizontal, style == .desktop ? 28 : (style == .tabletop ? 12 : 20))
+                .padding(
+                    .vertical,
+                    (style == .desktop ? 28 : (style == .tabletop ? 12 : 20))
+                        + (style == .desktop ? 150 : (lyrics.isSynced ? (style == .player ? 90 : 40) : 0))
+                )
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .contentMargins(
-                .vertical,
-                style == .desktop ? 150 : (lyrics.isSynced ? (style == .player ? 90 : 40) : 0),
-                for: .scrollContent
-            )
             .background(
                 Color.primary.opacity(style == .player ? 0.035 : 0),
                 in: RoundedRectangle(cornerRadius: 20, style: .continuous)
             )
-            .onChange(of: activeID, initial: true) { _, lineID in
+            .onAppear {
+                guard lyrics.isSynced, let lineID = activeID else { return }
+                proxy.scrollTo(lineID, anchor: .center)
+            }
+            .onChange(of: activeID) { lineID in
                 guard lyrics.isSynced, let lineID else { return }
                 withAnimation(.easeInOut(duration: 0.28)) {
                     proxy.scrollTo(lineID, anchor: .center)

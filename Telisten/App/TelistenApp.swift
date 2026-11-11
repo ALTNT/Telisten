@@ -2,7 +2,8 @@ import SwiftUI
 
 @main
 struct TelistenApp: App {
-    @State private var model = AppModel()
+    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var model = AppModel()
     @State private var startupTask: Task<Void, Never>?
     #if os(macOS)
     @AppStorage("floatingLyrics.locked") private var lyricsLocked = false
@@ -12,6 +13,16 @@ struct TelistenApp: App {
         WindowGroup(id: "library") {
             RootView(model: model)
                 .task { await startIfNeeded() }
+                .onChange(of: scenePhase) { phase in
+                    switch phase {
+                    case .background:
+                        model.applicationDidEnterBackground()
+                    case .active:
+                        Task { await model.applicationDidBecomeActive() }
+                    default:
+                        break
+                    }
+                }
                 #if os(visionOS)
                 .frame(minWidth: 760, minHeight: 560)
                 #else
@@ -69,5 +80,8 @@ struct TelistenApp: App {
             startupTask = Task { await model.start() }
         }
         await startupTask?.value
+        if scenePhase == .active {
+            await model.applicationDidBecomeActive()
+        }
     }
 }

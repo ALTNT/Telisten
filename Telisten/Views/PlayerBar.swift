@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct PlayerBar: View {
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
     #if os(macOS)
     @Binding var showsLyrics: Bool
     #endif
@@ -93,7 +93,6 @@ struct PlayerBar: View {
                         model.cyclePlaybackMode()
                     }
                         .labelStyle(.iconOnly)
-                        .contentTransition(.symbolEffect(.replace))
                         .accessibilityValue(model.playbackMode.title)
                         .accessibilityHint("Switches to \(model.playbackMode.next.title.lowercased())")
                 }
@@ -110,22 +109,25 @@ struct PlayerBar: View {
         }
         .overlay(alignment: .bottom) {
             if let lyricPreview, bottomSafeArea > 0, !usesWideLayout {
-                VStack(alignment: .center, spacing: 0) {
-                    ForEach(Array(lyricPreview.enumerated()), id: \.offset) { index, line in
-                        Text(line)
-                            .font(.system(size: index == 0 ? 13.4 : 11.5, weight: index == 0 ? .semibold : .regular))
-                            .foregroundStyle(index == 0 ? .primary : .secondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: .infinity, alignment: .center)
+                Button {
+                    model.showNowPlaying = true
+                } label: {
+                    VStack(alignment: .center, spacing: 0) {
+                        ForEach(Array(lyricPreview.enumerated()), id: \.offset) { index, line in
+                            Text(line)
+                                .font(.system(size: index == 0 ? 13.4 : 11.5, weight: index == 0 ? .semibold : .regular))
+                                .foregroundStyle(index == 0 ? .primary : .secondary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                        }
                     }
+                    .padding(.horizontal, 12)
+                    .frame(maxWidth: .infinity, minHeight: bottomSafeArea, alignment: .center)
                 }
-                .padding(.horizontal, 12)
-                .frame(maxWidth: .infinity, minHeight: bottomSafeArea, alignment: .center)
-                .offset(y: max(bottomSafeArea - 6, 0))
-                .contentShape(Rectangle())
-                .onTapGesture { model.showNowPlaying = true }
+                .buttonStyle(.plain)
+                .offset(y: bottomSafeArea)
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel("Lyrics preview")
             }

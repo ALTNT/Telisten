@@ -180,7 +180,7 @@ private struct CardModifier: ViewModifier {
             .background(.background, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(.separator.opacity(0.35), lineWidth: 0.5)
+                    .stroke(Color.secondary.opacity(0.35), lineWidth: 0.5)
             }
             .shadow(color: .black.opacity(0.05), radius: 14, y: 6)
     }

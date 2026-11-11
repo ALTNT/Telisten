@@ -56,7 +56,7 @@ private struct PlayerWindowSizeReader: UIViewRepresentable {
 #endif
 
 struct LibraryView: View {
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     #if DEBUG
     @State private var showSettings = ProcessInfo.processInfo.arguments.contains("--demo-settings")
@@ -84,7 +84,7 @@ struct LibraryView: View {
             let wideLayout = true
             #endif
             libraryColumns(wideLayout: wideLayout, geometry: geometry)
-            .onChange(of: model.selected) { _, value in
+            .onChange(of: model.selected) { value in
                 Task { await model.select(value) }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -110,7 +110,7 @@ struct LibraryView: View {
             .sheet(isPresented: $showSettings) {
                 SettingsView(model: model)
             }
-            .onChange(of: wideLayout) { _, isWide in
+            .onChange(of: wideLayout) { isWide in
                 if isWide { columnVisibility = .all }
             }
             #else
@@ -476,11 +476,7 @@ struct LibraryView: View {
                 if model.isLoading && model.tracks.isEmpty {
                     ProgressView("Finding music…")
                 } else if model.tracks.isEmpty {
-                    ContentUnavailableView(
-                        localizedUI(emptyTitle),
-                        systemImage: emptySymbol,
-                        description: Text(localizedUI(emptyDescription))
-                    )
+                    emptyTracksPlaceholder
                 } else {
                     trackList(includeSearchBots: false)
                 }
@@ -490,7 +486,7 @@ struct LibraryView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(usesCompactBackButton)
-        .toolbarVisibility(.visible, for: .navigationBar)
+        .toolbar(.visible, for: .navigationBar)
         .simultaneousGesture(detailBackGesture)
         #endif
         #if os(iOS)
@@ -506,19 +502,25 @@ struct LibraryView: View {
         )
         #endif
         .onSubmit(of: .search) { Task { await model.search() } }
-        .onChange(of: model.selectedChat?.id) { _, _ in
+        .onChange(of: model.selectedChat?.id) { _ in
             isEditingPlaylist = false
             playlistTitleDraft = selectedPlaylist?.title ?? ""
         }
-        .onChange(of: isEditingPlaylist) { wasEditing, isEditing in
-            if isEditing, let playlist = selectedPlaylist {
-                playlistTitleDraft = playlist.title
-            } else if wasEditing {
+        .onChange(of: isEditingPlaylist) { isEditing in
+            if isEditing {
+                if let playlist = selectedPlaylist {
+                    playlistTitleDraft = playlist.title
+                }
+            } else {
                 commitPlaylistTitle()
                 playlistTitleFocused = false
             }
         }
-        .toolbar {
+        .toolbar(content: { trackBrowserToolbar })
+    }
+
+    @ToolbarContentBuilder
+    private var trackBrowserToolbar: some ToolbarContent {
             ToolbarItem(placement: .principal) {
                 if let playlist = selectedPlaylist, isEditingPlaylist {
                     HStack(spacing: 7) {
@@ -601,7 +603,22 @@ struct LibraryView: View {
                     }
                 }
             }
+    }
+
+    private var emptyTracksPlaceholder: some View {
+        VStack(spacing: 8) {
+            Image(systemName: emptySymbol)
+                .font(.system(size: 30))
+                .foregroundStyle(.secondary)
+            Text(localizedUI(emptyTitle))
+                .font(.headline)
+            Text(localizedUI(emptyDescription))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
+        .padding(.horizontal)
+        .frame(maxWidth: .infinity, minHeight: 240)
     }
 
     private func trackList(includeSearchBots: Bool) -> some View {
@@ -623,12 +640,7 @@ struct LibraryView: View {
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
             } else if model.tracks.isEmpty {
-                ContentUnavailableView(
-                    emptyTitle,
-                    systemImage: emptySymbol,
-                    description: Text(localizedUI(emptyDescription))
-                )
-                .frame(maxWidth: .infinity, minHeight: 240)
+                emptyTracksPlaceholder
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
             } else {
@@ -784,46 +796,56 @@ struct LibraryView: View {
 }
 
 private struct TrackRow: View {
-    @Bindable var model: AppModel
+    @ObservedObject var model: AppModel
     let track: Track
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                TrackArtwork(model: model, track: track, size: 44)
-                    .overlay(alignment: .center) {
-                        if isCurrent && model.player.isLoading {
-                            ProgressView()
-                                .controlSize(.small)
-                                .tint(.white)
-                        } else if isCurrent && model.player.isPlaying {
-                            Image(systemName: "waveform")
-                                .font(.callout.weight(.semibold))
-                                .foregroundStyle(.white)
-                                .shadow(radius: 2)
+                Button {
+                    model.play(track)
+                } label: {
+                    HStack(spacing: 10) {
+                        TrackArtwork(model: model, track: track, size: 44)
+                            .overlay(alignment: .center) {
+                                if isCurrent && model.player.isLoading {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                        .tint(.white)
+                                } else if isCurrent && model.player.isPlaying {
+                                    Image(systemName: "waveform")
+                                        .font(.callout.weight(.semibold))
+                                        .foregroundStyle(.white)
+                                        .shadow(radius: 2)
+                                }
+                            }
+                            .overlay(alignment: .bottomTrailing) {
+                                if model.cachedIDs.contains(track.id) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(.green)
+                                        .background(.background, in: Circle())
+                                        .offset(x: 3, y: 3)
+                                        .accessibilityLabel("Downloaded")
+                                }
+                            }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(track.displayTitle)
+                                .font(.subheadline.weight(isCurrent ? .semibold : .regular))
+                                .lineLimit(1)
+                                .foregroundStyle(isCurrent ? Color.telistenAccent : .primary)
+                            Text(metadata)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
                         }
+                        .layoutPriority(1)
+                        Spacer(minLength: 2)
                     }
-                    .overlay(alignment: .bottomTrailing) {
-                        if model.cachedIDs.contains(track.id) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(.green)
-                                .background(.background, in: Circle())
-                                .offset(x: 3, y: 3)
-                                .accessibilityLabel("Downloaded")
-                        }
-                    }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(track.displayTitle)
-                        .font(.subheadline.weight(isCurrent ? .semibold : .regular))
-                        .lineLimit(1)
-                        .foregroundStyle(isCurrent ? Color.telistenAccent : .primary)
-                    Text(metadata)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    .contentShape(Rectangle())
                 }
-                .layoutPriority(1)
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 Spacer(minLength: 2)
                 favoriteButton
                 moreMenu
@@ -835,8 +857,6 @@ private struct TrackRow: View {
             Divider()
                 .padding(.leading, 54)
         }
-        .contentShape(Rectangle())
-        .onTapGesture { model.play(track) }
         .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 8))
         .listRowSeparator(.hidden)
         .contextMenu {

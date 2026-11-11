@@ -15497,54 +15497,54 @@
         }
       }
     },
-    "Signing out removes this account's MTProto session keys from Keychain. Other accounts stay signed in.": {
+    "Signing out removes this account's Telegram session data. Other accounts stay signed in.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Signing out removes this account's MTProto session keys from Keychain. Other accounts stay signed in."
+            "value": "Signing out removes this account's Telegram session data. Other accounts stay signed in."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "注销会从钥匙串中删除该帐户的 MTProto 会话密钥。其他帐户保持登录状态。"
+            "value": "注销会删除此帐户的 Telegram 会话数据。其他帐户仍保持登录状态。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "註銷會從鑰匙圈中刪除該帳戶的 MTProto 會話金鑰。其他帳號保持登入狀態。"
+            "value": "登出會刪除此帳戶的 Telegram 會話資料。其他帳戶仍保持登入狀態。"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "サインアウトすると、このアカウントの MTProto セッション キーがキーチェーンから削除されます。他のアカウントはサインインしたままになります。"
+            "value": "サインアウトすると、このアカウントの Telegram セッションデータが削除されます。他のアカウントはサインインしたままになります。"
           }
         },
         "vi": {
           "stringUnit": {
             "state": "translated",
-            "value": "Việc đăng xuất sẽ xóa khóa phiên MTProto của tài khoản này khỏi Chuỗi khóa. Các tài khoản khác vẫn đăng nhập."
+            "value": "Đăng xuất sẽ xóa dữ liệu phiên Telegram của tài khoản này. Các tài khoản khác vẫn đăng nhập."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "La déconnexion supprime les clés de session MTProto de ce compte du trousseau. Les autres comptes restent connectés."
+            "value": "La déconnexion supprime les données de session Telegram de ce compte. Les autres comptes restent connectés."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Al cerrar sesión se eliminan las claves de sesión MTProto de esta cuenta del Llavero. Otras cuentas permanecen iniciadas."
+            "value": "Al cerrar sesión se eliminan los datos de sesión de Telegram de esta cuenta. Otras cuentas permanecen iniciadas."
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "로그아웃하면 이 계정의 MTProto 세션 키가 키체인에서 제거됩니다. 다른 계정은 로그인된 상태로 유지됩니다."
+            "value": "로그아웃하면 이 계정의 Telegram 세션 데이터가 삭제됩니다. 다른 계정은 로그인된 상태로 유지됩니다."
           }
         }
       }
