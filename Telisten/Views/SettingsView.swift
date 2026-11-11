@@ -9,6 +9,8 @@ struct SettingsView: View {
     @State private var editingSearchBot: SearchBotConfig?
     @State private var playlistFolderDraft = ""
     @State private var playlistFolderError: String?
+    @State private var isRefreshingCache = true
+    @State private var isConfirmingClearCache = false
 
     var body: some View {
         NavigationStack {
@@ -29,6 +31,20 @@ struct SettingsView: View {
                     Text("Partial streams resume from disk. Oldest cached music is removed when this limit is reached.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if isRefreshingCache {
+                        ProgressView("Loading cached audio…")
+                    } else if model.cachedAudioItems.isEmpty {
+                        Text("No cached audio.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(model.cachedAudioItems) { item in
+                            cachedAudioRow(item)
+                        }
+                        Button("Clear all", systemImage: "trash", role: .destructive) {
+                            isConfirmingClearCache = true
+                        }
+                        .disabled(model.isCacheManagementBusy)
+                    }
                 }
                 Section {
                     TextField("Playlist folder name", text: $playlistFolderDraft)
@@ -129,14 +145,28 @@ struct SettingsView: View {
                 #endif
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
+            .confirmationDialog(
+                "Clear offline cache?",
+                isPresented: $isConfirmingClearCache,
+                titleVisibility: .visible
+            ) {
+                Button("Clear all cached audio", role: .destructive) {
+                    model.clearOfflineCache()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Cached audio for active playback or downloads will be kept.")
+            }
         }
         #if os(macOS)
         .frame(minWidth: 360, minHeight: 360)
         #endif
         .task {
+            isRefreshingCache = true
             lyricsServerDraft = model.lyricsServerURL.absoluteString
             playlistFolderDraft = model.playlistFolderName
             await model.refreshCacheUsage()
+            isRefreshingCache = false
         }
         .sheet(item: $editingSearchBot) { config in
             SearchBotEditorView(model: model, config: config)
@@ -148,6 +178,35 @@ struct SettingsView: View {
             get: { model.cacheLimitBytes },
             set: { model.setCacheLimit($0) }
         )
+    }
+
+    private func cachedAudioRow(_ item: CachedAudioItem) -> some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.track?.displayTitle ?? "Unknown cached track")
+                    .lineLimit(1)
+                Text(item.track?.displayArtist ?? "Track ID: \(item.trackID)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(DisplayFormat.fileSize(item.byteCount))
+                    .monospacedDigit()
+                if item.isPartial {
+                    Text("Partial")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Button("Remove cached audio", systemImage: "trash", role: .destructive) {
+                model.removeCachedAudio(item)
+            }
+            .labelStyle(.iconOnly)
+            .disabled(!model.canRemoveCachedAudio(trackID: item.trackID))
+            .accessibilityLabel("Remove cached \(item.track?.displayTitle ?? item.trackID)")
+        }
     }
 
     private func applyPlaylistFolder() {

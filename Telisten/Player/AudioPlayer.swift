@@ -31,7 +31,10 @@ final class AudioPlayer: ObservableObject {
     var onFinished: (@MainActor @Sendable () -> Void)?
     var onNext: (@MainActor @Sendable () -> Void)?
     var onPrevious: (@MainActor @Sendable () -> Void)?
+    var onPlayRequested: (@MainActor @Sendable () -> Void)?
     var onError: (@MainActor @Sendable (String) -> Void)?
+
+    var hasCurrentItem: Bool { player.currentItem != nil }
 
     private let player: AVPlayer
     private var timeObserver: Any?
@@ -188,7 +191,11 @@ final class AudioPlayer: ObservableObject {
     }
 
     func play() {
-        guard let item = player.currentItem, item.status != .failed else { return }
+        guard let item = player.currentItem else {
+            if track != nil, !isLoading { onPlayRequested?() }
+            return
+        }
+        guard item.status != .failed else { return }
         activateAudioSession()
         wantsPlayback = true
         player.play()
@@ -213,6 +220,17 @@ final class AudioPlayer: ObservableObject {
         isLoading = false
         currentTime = 0
         duration = 0
+        updateNowPlaying()
+    }
+
+    func restore(_ track: Track?) {
+        clearCurrentItem()
+        self.track = track
+        wantsPlayback = false
+        isPlaying = false
+        isLoading = false
+        currentTime = 0
+        duration = track.map { $0.duration.isFinite ? max(0, $0.duration) : 0 } ?? 0
         updateNowPlaying()
     }
 

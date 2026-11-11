@@ -69,6 +69,7 @@ final class AppModel: ObservableObject {
     @Published var showListenTogetherSheet = false
     @Published var listenTogetherState: ListenTogetherState = .idle
     @Published var cacheBytes: Int64 = 0
+    @Published private(set) var cachedAudioItems: [CachedAudioItem] = []
     @Published var cacheLimitBytes: Int64
     @Published var lyricsServerURL: URL
     @Published var searchBots: [SearchBotConfig] = []
@@ -193,6 +194,7 @@ final class AppModel: ObservableObject {
         player.onFinished = { [weak self] in self?.trackFinished() }
         player.onNext = { [weak self] in self?.next() }
         player.onPrevious = { [weak self] in self?.previous() }
+        player.onPlayRequested = { [weak self] in self?.resumeRestoredTrack() }
         player.onError = { [weak self] message in
             guard let self else { return }
             if let track = self.player.track,
@@ -915,9 +917,25 @@ final class AppModel: ObservableObject {
         let source = list ?? tracks
         queue = source
         currentQueueIndex = source.firstIndex(where: { $0.id == track.id })
-        persistLibrary()
+        knownTracks[track.id] = track
         resetTrackDetails(ifChangingTo: track)
         player.beginLoading(track)
+        persistLibrary()
+        schedulePlayback(of: track)
+    }
+
+    private func resumeRestoredTrack() {
+        guard let track = player.track, !player.isLoading else { return }
+        if let index = queue.firstIndex(where: { $0.id == track.id }) {
+            currentQueueIndex = index
+        } else {
+            queue.append(track)
+            currentQueueIndex = queue.count - 1
+        }
+        knownTracks[track.id] = track
+        resetTrackDetails(ifChangingTo: track)
+        player.beginLoading(track)
+        persistLibrary()
         schedulePlayback(of: track)
     }
 
@@ -1654,6 +1672,17 @@ final class AppModel: ObservableObject {
 
     func refreshCacheUsage() async {
         let actualCachedIDs = await cache.cachedTrackIDs()
+        let cacheItems = await cache.cachedAudioItems()
+        cachedAudioItems = cacheItems.map { item in
+            var resolved = item
+            if resolved.track == nil {
+                resolved.track = knownTracks[item.trackID]
+                    ?? sharedDownloadedTracks[item.trackID]
+                    ?? queue.first(where: { $0.id == item.trackID })
+                    ?? tracks.first(where: { $0.id == item.trackID })
+            }
+            return resolved
+        }
         cachedIDs = actualCachedIDs
         cacheBytes = await cache.totalBytes()
         reconcileSharedDownloads(with: actualCachedIDs)
@@ -1753,9 +1782,53 @@ final class AppModel: ObservableObject {
                 clearPendingDownloadResumeID(track.id)
                 cachedIDs.remove(track.id)
                 downloads[track.id] = DownloadStatus.none
-                cacheBytes = await cache.totalBytes()
-                reconcileSharedDownloads(with: cachedIDs)
+                await refreshCacheUsage()
                 if selected == .downloads { tracks.removeAll { $0.id == track.id } }
+            } catch {
+                errorMessage = UserFacingError.message(for: error)
+            }
+        }
+    }
+
+    var isCacheManagementBusy: Bool {
+        downloads.values.contains(where: \.isDownloading)
+    }
+
+    func canRemoveCachedAudio(trackID: String) -> Bool {
+        guard downloads[trackID]?.isDownloading != true else { return false }
+        return player.track?.id != trackID || (!player.hasCurrentItem && !player.isLoading)
+    }
+
+    func removeCachedAudio(_ item: CachedAudioItem) {
+        guard canRemoveCachedAudio(trackID: item.trackID) else { return }
+        Task {
+            do {
+                try await cache.removeCachedAudio(trackID: item.trackID)
+                clearPendingDownloadResumeID(item.trackID)
+                downloads[item.trackID] = DownloadStatus.none
+                await refreshCacheUsage()
+            } catch {
+                errorMessage = UserFacingError.message(for: error)
+            }
+        }
+    }
+
+    func clearOfflineCache() {
+        guard !isCacheManagementBusy else { return }
+        Task {
+            var preservedIDs = Set(activeTransfers.keys)
+            if (player.hasCurrentItem || player.isLoading), let trackID = player.track?.id {
+                preservedIDs.insert(trackID)
+            }
+            do {
+                try await cache.clearCachedAudio(except: preservedIDs)
+                for trackID in Array(pendingDownloadResumeIDs) where !preservedIDs.contains(trackID) {
+                    clearPendingDownloadResumeID(trackID)
+                }
+                for item in cachedAudioItems where !preservedIDs.contains(item.trackID) {
+                    downloads[item.trackID] = DownloadStatus.none
+                }
+                await refreshCacheUsage()
             } catch {
                 errorMessage = UserFacingError.message(for: error)
             }
@@ -1813,8 +1886,10 @@ final class AppModel: ObservableObject {
         guard queue.indices.contains(index) else { return }
         currentQueueIndex = index
         let track = queue[index]
+        knownTracks[track.id] = track
         resetTrackDetails(ifChangingTo: track)
         player.beginLoading(track)
+        persistLibrary()
         schedulePlayback(of: track)
     }
 
@@ -3335,6 +3410,25 @@ final class AppModel: ObservableObject {
            let values = try? JSONDecoder().decode([Track].self, from: data) {
             queue = values
         }
+        if let savedIndex = defaults.object(forKey: accountStorageKey("player.queueIndex")) as? Int,
+           queue.indices.contains(savedIndex) {
+            currentQueueIndex = savedIndex
+        } else {
+            currentQueueIndex = nil
+        }
+        if !player.hasCurrentItem, !player.isLoading {
+            if let data = defaults.data(forKey: accountStorageKey("player.lastTrack")),
+               let lastTrack = try? JSONDecoder().decode(Track.self, from: data) {
+                if !queue.contains(where: { $0.id == lastTrack.id }) {
+                    queue.append(lastTrack)
+                }
+                currentQueueIndex = queue.firstIndex(where: { $0.id == lastTrack.id })
+                knownTracks[lastTrack.id] = lastTrack
+                player.restore(lastTrack)
+            } else {
+                player.restore(nil)
+            }
+        }
         if let data = defaults.data(forKey: accountStorageKey("music.chatIndex")),
            let values = try? JSONDecoder().decode([String: MusicChatIndexEntry].self, from: data) {
             musicChatIndex = values
@@ -3363,10 +3457,14 @@ final class AppModel: ObservableObject {
         let favoriteIDs = Array(favorites)
         let tracks = Array(knownTracks.values)
         let queuedTracks = queue
+        let queueIndex = currentQueueIndex
+        let lastTrack = player.track
         let orders = playlistOrders
         let favoritesKey = accountStorageKey("library.favorites")
         let tracksKey = accountStorageKey("library.tracks")
         let queueKey = accountStorageKey("player.queue")
+        let queueIndexKey = accountStorageKey("player.queueIndex")
+        let lastTrackKey = accountStorageKey("player.lastTrack")
         let ordersKey = accountStorageKey("playlist.trackOrders")
         let playbackModeValue = playbackMode.rawValue
         persistSavedChats()
@@ -3379,6 +3477,14 @@ final class AppModel: ObservableObject {
             defaults.removeObject(forKey: "player.shuffle")
             defaults.set(try? encoder.encode(tracks), forKey: tracksKey)
             defaults.set(try? encoder.encode(queuedTracks), forKey: queueKey)
+            if let queueIndex {
+                defaults.set(queueIndex, forKey: queueIndexKey)
+            } else {
+                defaults.removeObject(forKey: queueIndexKey)
+            }
+            if let lastTrack {
+                defaults.set(try? encoder.encode(lastTrack), forKey: lastTrackKey)
+            }
             defaults.set(try? encoder.encode(orders), forKey: ordersKey)
         }
         reconcileSharedDownloads(with: cachedIDs)

@@ -22,6 +22,16 @@ struct PartialCacheLocation: Sendable {
     var stateURL: URL
 }
 
+struct CachedAudioItem: Identifiable, Sendable {
+    var trackID: String
+    var track: Track?
+    var byteCount: Int64
+    var isPartial: Bool
+    var lastAccess: Date
+
+    var id: String { isPartial ? "\(trackID):partial" : trackID }
+}
+
 private struct PartialDownloadState: Codable {
     var trackID: String
     var fileName: String
@@ -477,16 +487,41 @@ actor CacheStore {
     }
 
     func remove(_ track: Track) throws {
-        if let entry = entries.removeValue(forKey: track.id) {
+        try removeCachedAudio(trackID: track.id)
+    }
+
+    func removeCachedAudio(trackID: String) throws {
+        if let entry = entries[trackID] {
             let url = root.appending(path: entry.fileName)
             if FileManager.default.fileExists(atPath: url.path) {
                 try FileManager.default.removeItem(at: url)
             }
+            entries.removeValue(forKey: trackID)
         }
-        try? FileManager.default.removeItem(at: recordURL(for: track.id))
-        let partial = partialLocation(for: track)
+        try? FileManager.default.removeItem(at: recordURL(for: trackID))
+        let base = ".\(safeName(for: trackID))"
+        let partial = PartialCacheLocation(
+            dataURL: root.appending(path: "\(base).download"),
+            stateURL: root.appending(path: "\(base).partial.json")
+        )
         try? FileManager.default.removeItem(at: partial.dataURL)
         try? FileManager.default.removeItem(at: partial.stateURL)
+        persist()
+    }
+
+    func clearCachedAudio(except trackIDs: Set<String> = []) throws {
+        for (trackID, entry) in Array(entries) where !trackIDs.contains(trackID) {
+            let url = root.appending(path: entry.fileName)
+            if FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
+            }
+            try? FileManager.default.removeItem(at: recordURL(for: trackID))
+            entries.removeValue(forKey: trackID)
+        }
+        for partial in partialRecords() where !trackIDs.contains(partial.trackID) {
+            try? FileManager.default.removeItem(at: partial.dataURL)
+            try? FileManager.default.removeItem(at: partial.stateURL)
+        }
         persist()
     }
 
@@ -509,6 +544,34 @@ actor CacheStore {
     func cachedTrackIDs() -> Set<String> {
         reconcileIndex()
         return Set(entries.keys)
+    }
+
+    func cachedAudioItems() -> [CachedAudioItem] {
+        reconcileIndex()
+        let completedIDs = Set(entries.keys)
+        var items = entries.values.map {
+            CachedAudioItem(
+                trackID: $0.trackID,
+                track: $0.track,
+                byteCount: $0.byteCount,
+                isPartial: false,
+                lastAccess: $0.lastAccess
+            )
+        }
+        items += partialRecords().compactMap { partial in
+            guard !completedIDs.contains(partial.trackID) else { return nil }
+            return CachedAudioItem(
+                trackID: partial.trackID,
+                track: nil,
+                byteCount: partial.byteCount,
+                isPartial: true,
+                lastAccess: partial.lastAccess
+            )
+        }
+        return items.sorted {
+            if $0.lastAccess != $1.lastAccess { return $0.lastAccess > $1.lastAccess }
+            return $0.trackID < $1.trackID
+        }
     }
 
     func totalBytes() -> Int64 {
