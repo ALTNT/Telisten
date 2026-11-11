@@ -37,9 +37,16 @@ struct SettingsView: View {
                         Text("No cached audio.")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(model.cachedAudioItems) { item in
-                            cachedAudioRow(item)
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(model.cachedAudioItems) { item in
+                                    cachedAudioRow(item)
+                                        .padding(.vertical, 6)
+                                    Divider()
+                                }
+                            }
                         }
+                        .frame(maxHeight: 320)
                         Button("Clear all", systemImage: "trash", role: .destructive) {
                             isConfirmingClearCache = true
                         }

@@ -1924,6 +1924,9 @@ final class AppModel: ObservableObject {
             player.loadStreaming(track) { offset, length in
                 try await transfer.bytes(at: offset, length: length)
             }
+            // Start caching even when the decoder has not requested or received
+            // its first bytes yet. Both paths reuse the same transfer and task.
+            cacheDuringPlayback(track)
         }
         guard !Task.isCancelled, player.track?.id == track.id else { return }
         await loadLyrics(for: track)
@@ -1940,8 +1943,10 @@ final class AppModel: ObservableObject {
             } catch is CancellationError {
                 return
             } catch {
-                if let fallbackError, self.player.track?.id == track.id {
-                    self.errorMessage = fallbackError
+                if self.player.track?.id == track.id,
+                   fallbackError != nil || self.player.isLoading {
+                    self.player.failLoading()
+                    self.errorMessage = fallbackError ?? UserFacingError.message(for: error)
                 }
                 return
             }
@@ -2049,12 +2054,6 @@ final class AppModel: ObservableObject {
         if let transfer = activeTransfers[track.id] { return transfer }
         let location = await cache.partialLocation(for: track)
         let telegram = telegram
-        let onPlaybackRequest: @Sendable () -> Void = { [weak self] in
-            Task { @MainActor [weak self] in
-                guard let self, self.player.track?.id == track.id else { return }
-                self.cacheDuringPlayback(track)
-            }
-        }
         // Another caller may have created the transfer while resolving the
         // cache location was suspended. Two actors must never write to the same partial file.
         if let transfer = activeTransfers[track.id] { return transfer }
@@ -2077,8 +2076,7 @@ final class AppModel: ObservableObject {
                         length: length
                     )
                 }
-            },
-            onPlaybackRequest: onPlaybackRequest
+            }
         )
         activeTransfers[track.id] = transfer
         return transfer

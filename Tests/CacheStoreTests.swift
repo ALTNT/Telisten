@@ -1,12 +1,18 @@
 import Foundation
 
-typealias AudioByteProvider = @Sendable (_ offset: Int64, _ length: Int32) async throws -> Data
-
 @main
 enum CacheStoreTests {
+    actor RangeRequests {
+        var offsets: [Int64] = []
+
+        func record(_ offset: Int64) {
+            offsets.append(offset)
+        }
+    }
+
     static func track(_ id: Int64, size: Int64 = 1024) -> Track {
         Track(documentID: id, accessHash: 1, fileReference: Data(), dcID: 2,
-              messageID: 1, chatID: "c:1", title: "Offline \(id)", artist: "Test",
+              messageID: id, chatID: "c:1", title: "Offline \(id)", artist: "Test",
               fileName: "offline.mp3", mimeType: "audio/mpeg", duration: 10,
               size: size, date: .now)
     }
@@ -59,14 +65,86 @@ enum CacheStoreTests {
         precondition(recovered.initialDownloadedTracks[downloaded.id] == downloaded)
         precondition(recovered.initialCachedTrackIDs.contains(downloaded.id))
 
+        // TDLib file IDs can change while the remote file remains the same.
+        // Reusing the old filename must not recover a second entry on relaunch.
+        let reusedRoot = sandbox.appending(path: "reused-audio")
+        let reusedCache = CacheStore(rootURL: reusedRoot)
+        var original = track(20)
+        original.remoteUniqueID = "same-remote-audio"
+        let originalTemporary = await reusedCache.partialLocation(for: original).dataURL
+        try audio.write(to: originalTemporary)
+        let originalURL = try await reusedCache.commit(originalTemporary, track: original)
+        var refreshed = original
+        refreshed.documentID = 21
+        let reusedURL = await reusedCache.localURL(for: refreshed)
+        precondition(reusedURL == originalURL)
+        let reusedAfterLaunch = CacheStore(rootURL: reusedRoot)
+        precondition(reusedAfterLaunch.initialCachedTrackIDs == [refreshed.id],
+                     "An audio file reused under a new ID must only be recovered once")
+        let reusedItems = await reusedAfterLaunch.cachedAudioItems()
+        let reusedBytes = await reusedAfterLaunch.totalBytes()
+        precondition(reusedItems.count == 1 && reusedBytes == original.size,
+                     "Reused audio must not duplicate cache rows or byte counts")
+
+        // Repair duplicate indexes and sidecar records left by older versions.
+        let staleEntry = CacheStore.Entry(trackID: original.id, fileName: originalURL.lastPathComponent,
+                                          byteCount: original.size, lastAccess: .distantPast, track: original)
+        let currentEntry = CacheStore.Entry(trackID: refreshed.id, fileName: originalURL.lastPathComponent,
+                                            byteCount: refreshed.size, lastAccess: .now, track: refreshed)
+        try JSONEncoder().encode([staleEntry, currentEntry]).write(to: reusedRoot.appending(path: "cache-index.json"))
+        let staleRecord = reusedRoot.appending(path: "2-20.audio.json")
+        try JSONEncoder().encode(staleEntry).write(to: staleRecord)
+        let repaired = CacheStore(rootURL: reusedRoot)
+        precondition(repaired.initialCachedTrackIDs == [refreshed.id])
+        precondition(repaired.initialDownloadedTracks[refreshed.id] == refreshed)
+        precondition(repaired.initialByteCount == original.size)
+        precondition(!fm.fileExists(atPath: staleRecord.path))
+        try Data("broken index".utf8).write(to: reusedRoot.appending(path: "cache-index.json"))
+        let repairedAgain = CacheStore(rootURL: reusedRoot)
+        precondition(repairedAgain.initialCachedTrackIDs == [refreshed.id],
+                     "Recovery records must not bring back duplicate entries")
+        let originalAgain = await repairedAgain.localURL(for: original)
+        precondition(originalAgain == originalURL, "Both TDLib IDs must reuse the same local audio")
+        let originalAfterLaunch = CacheStore(rootURL: reusedRoot)
+        precondition(originalAfterLaunch.initialCachedTrackIDs == [original.id])
+        try await originalAfterLaunch.remove(original)
+        precondition(!fm.fileExists(atPath: originalURL.path))
+        precondition(CacheStore(rootURL: reusedRoot).initialCachedTrackIDs.isEmpty)
+
+        // Cold-cache playback and a download started immediately must share
+        // in-flight range requests and produce one complete audio file.
+        let coldCache = CacheStore(rootURL: sandbox.appending(path: "cold-playback"))
+        let coldTrack = track(30, size: 3 * 1024 * 1024)
+        let coldLocation = await coldCache.partialLocation(for: coldTrack)
+        let requests = RangeRequests()
+        let coldTransfer = ProgressiveAudioTransfer(
+            trackID: coldTrack.id, fileSize: coldTrack.size, location: coldLocation
+        ) { offset, count, _ in
+            await requests.record(offset)
+            await Task.yield()
+            return Data(repeating: 0x66, count: Int(count))
+        }
+        async let coldDownload: Void = coldTransfer.downloadAll { _ in }
+        async let coldPlayback = coldTransfer.bytes(at: 0, length: 256 * 1024)
+        let (_, coldBytes) = try await (coldDownload, coldPlayback)
+        precondition(coldBytes == Data(repeating: 0x66, count: 256 * 1024))
+        let fetchedOffsets = await requests.offsets
+        let expectedOffsets: [Int64] = [0, 1024 * 1024, 2 * 1024 * 1024]
+        precondition(fetchedOffsets.sorted() == expectedOffsets,
+                     "Concurrent streaming and downloading must fetch each range only once")
+        let coldURL = try await coldCache.commit(coldLocation.dataURL, track: coldTrack)
+        await coldTransfer.didCommit(to: coldURL)
+        let coldCachedURL = await coldCache.localURL(for: coldTrack)
+        precondition(coldCachedURL == coldURL)
+
         // Persist partial bytes across launch without fetching them a second time.
         let partialTrack = track(4, size: 1024 * 1024)
         let location = await recovered.partialLocation(for: partialTrack)
-        let transfer = ProgressiveAudioTransfer(trackID: partialTrack.id, fileSize: partialTrack.size, location: location) { _, count in
+        let transfer = ProgressiveAudioTransfer(trackID: partialTrack.id, fileSize: partialTrack.size, location: location) { _, count, _ in
             Data(repeating: 0x55, count: Int(count))
         }
         let firstChunk = try await transfer.bytes(at: 0, length: 512 * 1024)
-        let resumed = ProgressiveAudioTransfer(trackID: partialTrack.id, fileSize: partialTrack.size, location: location) { _, _ in
+        let resumed = ProgressiveAudioTransfer(trackID: partialTrack.id, fileSize: partialTrack.size, location: location) { _, _, _ in
             fatalError("Cached partial bytes must not be requested from Telegram again")
         }
         let resumedChunk = try await resumed.bytes(at: 0, length: 512 * 1024)
@@ -76,7 +154,7 @@ enum CacheStoreTests {
         let migratedPartialRoot = sandbox.appending(path: "migrated-partials")
         let partialMigration = CacheStore(rootURL: migratedPartialRoot, legacyURL: root)
         let migratedLocation = await partialMigration.partialLocation(for: partialTrack)
-        let migratedTransfer = ProgressiveAudioTransfer(trackID: partialTrack.id, fileSize: partialTrack.size, location: migratedLocation) { _, _ in
+        let migratedTransfer = ProgressiveAudioTransfer(trackID: partialTrack.id, fileSize: partialTrack.size, location: migratedLocation) { _, _, _ in
             fatalError("Migrated partial bytes must be reused offline")
         }
         let migratedChunk = try await migratedTransfer.bytes(at: 0, length: 512 * 1024)
@@ -118,6 +196,6 @@ enum CacheStoreTests {
         }
         precondition(CacheStore(rootURL: boundedRoot).initialCachedTrackIDs == [track(11).id],
                      "Eviction must remove recovery records so evicted downloads do not reappear")
-        print("PASS: durable downloads, migration, orphan recovery, relaunch, lost index, metadata recovery, partial resume, deletion, truncated files, container relocation")
+        print("PASS: durable downloads, migration, orphan recovery, relaunch, lost index, metadata recovery, reused audio deduplication, duplicate index repair, concurrent cold-cache playback/download, partial resume, deletion, truncated files, container relocation")
     }
 }

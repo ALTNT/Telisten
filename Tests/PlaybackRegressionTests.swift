@@ -45,13 +45,32 @@ enum PlaybackRegressionTests {
         player.seek(to: .nan)
         player.seek(to: .infinity)
         precondition(player.currentTime.isFinite)
+
+        // A cold-cache stream can finish caching while paused or after decoding
+        // fails. Only a stream that still wants playback should switch to disk.
+        let bytes = try Data(contentsOf: url)
+        player.beginLoading(first)
+        player.loadStreaming(first) { offset, length in
+            bytes.subdata(in: Int(offset)..<min(bytes.count, Int(offset) + Int(length)))
+        }
+        precondition(player.canRecoverFromCachedFile(first))
+        player.pause()
+        player.useCachedFileIfNeeded(first, from: url)
+        precondition(!player.isPlaying && !player.canRecoverFromCachedFile(first),
+                     "Completing the cache must not resume a paused stream")
+        player.play()
+        player.failLoading()
+        precondition(player.canRecoverFromCachedFile(first))
+        player.useCachedFileIfNeeded(first, from: url)
+        precondition(player.hasCurrentItem && !player.canRecoverFromCachedFile(first),
+                     "A failed stream must be able to fall back to the downloaded file")
         player.reset()
-        print("PASS: retired-item completion race, active-item completion, non-finite duration/seek, oversized duration formatting")
+        print("PASS: retired-item completion race, active-item completion, non-finite duration/seek, oversized duration formatting, paused cache completion, failed stream recovery")
     }
 
     static func track(id: Int64, duration: TimeInterval = 1) -> Track {
         Track(documentID: id, accessHash: 0, fileReference: Data(), dcID: 1,
-              messageID: Int32(id), chatID: "test", title: "Fixture", artist: "", fileName: "test.wav",
+              messageID: id, chatID: "test", title: "Fixture", artist: "", fileName: "test.wav",
               mimeType: "audio/wav", duration: duration, size: 88_244, date: Date())
     }
 }

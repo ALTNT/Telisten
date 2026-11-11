@@ -396,19 +396,37 @@ actor CacheStore {
         }
         // Recover legacy completed files even if the old index was lost.
         // Partial transfers have hidden .download names and are never promoted.
+        let indexedFileNames = Set(candidates.values.map(\.fileName))
         for file in files {
             guard let id = audioID(for: file.lastPathComponent), candidates[id] == nil,
+                  !indexedFileNames.contains(file.lastPathComponent),
                   let values = try? file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]),
                   values.isRegularFile == true, let size = values.fileSize, size > 0 else { continue }
             candidates[id] = Entry(trackID: id, fileName: file.lastPathComponent,
                                    byteCount: Int64(size), lastAccess: values.contentModificationDate ?? .now)
         }
-        return candidates.filter { _, entry in
+        let validEntries = candidates.values.filter { entry in
             guard entry.fileName == (entry.fileName as NSString).lastPathComponent,
                   let values = try? root.appending(path: entry.fileName).resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
                   values.isRegularFile == true, let size = values.fileSize else { return false }
             return size > 0 && Int64(size) == entry.byteCount
         }
+        // Older versions could index a reused filename under both its old ID
+        // and its current ID. Keep one record with the best available metadata.
+        var recovered: [String: Entry] = [:]
+        for entry in validEntries.sorted(by: {
+            if ($0.track != nil) != ($1.track != nil) { return $0.track != nil }
+            if $0.lastAccess != $1.lastAccess { return $0.lastAccess > $1.lastAccess }
+            return $0.trackID < $1.trackID
+        }) {
+            if recovered[entry.fileName] == nil {
+                recovered[entry.fileName] = entry
+            } else {
+                let name = entry.trackID.replacingOccurrences(of: ":", with: "-")
+                try? FileManager.default.removeItem(at: root.appending(path: "\(name).audio.json"))
+            }
+        }
+        return Dictionary(uniqueKeysWithValues: recovered.values.map { ($0.trackID, $0) })
     }
 
     func localURL(for track: Track) -> URL? {
