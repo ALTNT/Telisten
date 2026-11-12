@@ -2,7 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @ObservedObject var model: AppModel
-    #if DEBUG && (os(macOS) || os(visionOS))
+    #if DEBUG && os(visionOS)
     @Environment(\.openWindow) private var openWindow
     #endif
 
@@ -18,7 +18,11 @@ struct RootView: View {
         #if DEBUG && (os(macOS) || os(visionOS))
         .task {
             if ProcessInfo.processInfo.arguments.contains("--demo-floating-lyrics") {
+                #if os(macOS)
+                LyricsWindow.open(model: model)
+                #else
                 openWindow(id: LyricsWindow.id, value: LyricsWindow.currentPlayback)
+                #endif
             }
         }
         #endif

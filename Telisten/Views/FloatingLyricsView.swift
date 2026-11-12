@@ -7,17 +7,67 @@ import AppKit
 enum LyricsWindow {
     static let id = "floating-lyrics"
     static let currentPlayback = "current-playback"
+
+    #if os(macOS)
+    @MainActor private static var panel: LyricsOverlayPanel?
+
+    @MainActor
+    static func open(model: AppModel) {
+        if let panel {
+            panel.orderFrontRegardless()
+            return
+        }
+
+        let screen = NSScreen.main?.visibleFrame ?? .zero
+        let panel = LyricsOverlayPanel(
+            contentRect: NSRect(x: screen.midX - 380, y: screen.minY + 40, width: 760, height: 160),
+            styleMask: [.titled, .closable, .nonactivatingPanel, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = String(localized: "Floating Lyrics")
+        panel.isReleasedWhenClosed = false
+        panel.hidesOnDeactivate = false
+        panel.isFloatingPanel = true
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.contentView = NSHostingView(rootView: FloatingLyricsView(model: model))
+        panel.contentView?.layoutSubtreeIfNeeded()
+        Self.panel = panel
+        panel.orderFrontRegardless()
+    }
+    #endif
 }
 
+#if os(macOS)
+private struct OpenLyricsWindowKey: EnvironmentKey {
+    static let defaultValue: @MainActor () -> Void = {}
+}
+
+extension EnvironmentValues {
+    var openLyricsWindow: @MainActor () -> Void {
+        get { self[OpenLyricsWindowKey.self] }
+        set { self[OpenLyricsWindowKey.self] = newValue }
+    }
+}
+#endif
+
 struct OpenLyricsWindowButton: View {
+    #if os(macOS)
+    @Environment(\.openLyricsWindow) private var openLyricsWindow
+    #else
     @Environment(\.openWindow) private var openWindow
+    #endif
     @AppStorage("floatingLyrics.locked") private var isLocked = false
 
     var body: some View {
         Button("Floating Lyrics", systemImage: "rectangle.on.rectangle") {
             // Opening from the app is also the recovery path for a click-through overlay.
             isLocked = false
+            #if os(macOS)
+            openLyricsWindow()
+            #else
             openWindow(id: LyricsWindow.id, value: LyricsWindow.currentPlayback)
+            #endif
         }
         .help("Open or unlock the floating lyrics window")
         .accessibilityIdentifier("lyrics.openWindow")
@@ -117,7 +167,8 @@ struct FloatingLyricsView: View {
             LyricsOverlayWindow(
                 controller: windowController,
                 keepsOnTop: preferences.keepsOnTop,
-                isLocked: preferences.isLocked
+                isLocked: preferences.isLocked,
+                size: NSSize(width: preferences.safeWidth, height: overlayHeight)
             )
         }
         #endif
@@ -295,6 +346,11 @@ struct FloatingLyricsView: View {
 }
 
 #if os(macOS)
+private final class LyricsOverlayPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
 @MainActor
 private final class LyricsOverlayWindowController {
     weak var window: NSWindow?
@@ -311,6 +367,7 @@ private struct LyricsOverlayWindow: NSViewRepresentable {
     let controller: LyricsOverlayWindowController
     let keepsOnTop: Bool
     let isLocked: Bool
+    let size: NSSize
 
     func makeNSView(context: Context) -> WindowObserver {
         let view = WindowObserver()
@@ -322,6 +379,7 @@ private struct LyricsOverlayWindow: NSViewRepresentable {
         view.controller = controller
         view.keepsOnTop = keepsOnTop
         view.isLocked = isLocked
+        view.size = size
         view.configureWindow()
     }
 
@@ -329,6 +387,7 @@ private struct LyricsOverlayWindow: NSViewRepresentable {
         var controller: LyricsOverlayWindowController?
         var keepsOnTop = true
         var isLocked = false
+        var size = NSSize(width: 760, height: 160)
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
@@ -338,6 +397,9 @@ private struct LyricsOverlayWindow: NSViewRepresentable {
         func configureWindow() {
             controller?.window = window
             guard let window else { return }
+            if window.contentLayoutRect.size != size {
+                window.setContentSize(size)
+            }
             window.level = keepsOnTop ? .floating : .normal
             window.backgroundColor = .clear
             window.isOpaque = false

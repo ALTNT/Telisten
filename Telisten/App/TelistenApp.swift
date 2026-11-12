@@ -12,6 +12,9 @@ struct TelistenApp: App {
     var body: some Scene {
         WindowGroup(id: "library") {
             RootView(model: model)
+                #if os(macOS)
+                .environment(\.openLyricsWindow, { LyricsWindow.open(model: model) })
+                #endif
                 .task { await startIfNeeded() }
                 .onChange(of: scenePhase) { phase in
                     switch phase {
@@ -45,13 +48,14 @@ struct TelistenApp: App {
                     .keyboardShortcut(.rightArrow, modifiers: [.command])
                 Divider()
                 OpenLyricsWindowButton()
+                    .environment(\.openLyricsWindow, { LyricsWindow.open(model: model) })
                     .keyboardShortcut("l", modifiers: [.command, .shift])
                 Toggle("Lock Floating Lyrics", isOn: $lyricsLocked)
             }
         }
         #endif
 
-        #if os(macOS) || os(visionOS)
+        #if os(visionOS)
         // A stable value brings the existing lyrics window forward on repeated opens.
         WindowGroup("Floating Lyrics", id: LyricsWindow.id, for: String.self) { _ in
             FloatingLyricsView(model: model)
@@ -60,10 +64,6 @@ struct TelistenApp: App {
             LyricsWindow.currentPlayback
         }
         .windowResizability(.contentSize)
-        #if os(macOS)
-        .windowStyle(.hiddenTitleBar)
-        .defaultPosition(.bottom)
-        #endif
         #if os(visionOS)
         .windowStyle(.plain)
         .defaultWindowPlacement { _, _ in
