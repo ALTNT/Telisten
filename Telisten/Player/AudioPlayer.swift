@@ -13,6 +13,7 @@ final class AudioPlayer: ObservableObject {
     @Published var volume: Float = 1 {
         didSet {
             player.volume = volume
+            UserDefaults.standard.set(volume, forKey: Self.volumeDefaultsKey)
             if volume > 0.001 { volumeBeforeMute = volume }
         }
     }
@@ -36,6 +37,7 @@ final class AudioPlayer: ObservableObject {
 
     var hasCurrentItem: Bool { player.currentItem != nil }
 
+    private static let volumeDefaultsKey = "player.volume"
     private let player: AVPlayer
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
@@ -50,6 +52,11 @@ final class AudioPlayer: ObservableObject {
 
     init(player: AVPlayer = AVPlayer(), configureSystemPlayback: Bool = true) {
         self.player = player
+        if let savedVolume = UserDefaults.standard.object(forKey: Self.volumeDefaultsKey) as? NSNumber {
+            volume = savedVolume.floatValue
+        }
+        player.volume = volume
+        if volume > 0.001 { volumeBeforeMute = volume }
         player.automaticallyWaitsToMinimizeStalling = false
         if configureSystemPlayback { configureAudioSession() }
         installTimeObserver()
