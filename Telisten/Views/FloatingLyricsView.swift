@@ -353,6 +353,12 @@ private struct LyricsOverlayWindow: NSViewRepresentable {
             window.isMovableByWindowBackground = !isLocked
             window.ignoresMouseEvents = isLocked
             window.collectionBehavior.insert(.fullScreenAuxiliary)
+            if keepsOnTop {
+                window.collectionBehavior.subtract([.primary, .auxiliary, .moveToActiveSpace])
+                window.collectionBehavior.formUnion([.canJoinAllSpaces, .canJoinAllApplications])
+            } else {
+                window.collectionBehavior.subtract([.canJoinAllSpaces, .canJoinAllApplications])
+            }
         }
     }
 }
