@@ -55,6 +55,12 @@ if [ ! -d "$framework_bundle/macos-arm64_x86_64/TDLibFramework.framework" ]; the
 fi
 
 cd "$project_dir"
+xcodebuild -resolvePackageDependencies \
+  -project Telisten.xcodeproj -scheme Telisten-macOS \
+  -clonedSourcePackagesDirPath "$source_packages_dir" \
+  -onlyUsePackageVersionsFromResolvedFile
+bash "$project_dir/Scripts/build-macos-tdlib.sh"
+
 echo "Building Telisten-macOS Release with minimum macOS $minimum_os"
 echo "Code signing allowed: $code_signing_allowed"
 echo "Allow provisioning updates: $allow_provisioning_updates"
@@ -68,6 +74,7 @@ xcodebuild "$@" \
   -configuration Release \
   -sdk macosx \
   -clonedSourcePackagesDirPath "$source_packages_dir" \
+  -disableAutomaticPackageResolution \
   SYMROOT="$build_root/Products" \
   OBJROOT="$build_root/Intermediates" \
   MACOSX_DEPLOYMENT_TARGET="$minimum_os" \
@@ -110,7 +117,8 @@ else
 fi
 
 if grep -q "built for newer 'macOS' version" "$build_log"; then
-  echo 'Warning: a linked framework contains object files built for a newer macOS version; compatibility with macOS 13 is not guaranteed.' >&2
+  echo 'A linked framework still targets a newer macOS version; refusing to package it as macOS 13 compatible.' >&2
+  exit 1
 fi
 
 rm -rf "$dmg_work_dir"

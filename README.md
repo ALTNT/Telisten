@@ -37,6 +37,8 @@ Select `Telisten-iOS`, `Telisten-macOS`, or `Telisten-visionOS`, choose your sig
 
 To build an unsigned iOS 16.3 package for TrollStore, run `./Scripts/build-ios-tipa.sh`. It creates `Telisten-iOS-16.3.tipa` in the repository root.
 
+To build the universal macOS 13 DMG, run `./Scripts/build-macos-dmg.sh`. In addition to Xcode, this requires CMake; the script uses the system Git, Make, Perl, and Python 3 tools. It rebuilds the pinned TDLib and its existing OpenSSL 3.1.5 dependency for macOS 13 instead of linking the upstream archive's macOS 15 objects. The first build downloads OpenSSL sources and compiles both architectures; later builds reuse `/private/tmp/TelistenMacTDLib`. Set `TELISTEN_MAC_TDLIB_BUILD_ROOT` to relocate this cache or `TELISTEN_TDLIB_JOBS` to change its default four build jobs. Each architecture's object deployment versions are checked before packaging; incompatible objects fail the build instead of being hidden.
+
 On visionOS, choose the Apple Vision Pro destination and install the visionOS SDK/simulator in Xcode if needed. The native app opens a resizable library window with a separate lyrics window you can place in your space. Use `--demo --demo-chat --demo-floating-lyrics` in a Debug scheme to preview both windows without signing in.
 
 #### Floating lyrics
