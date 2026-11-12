@@ -303,6 +303,7 @@ actor CacheStore {
     private let root: URL
     private let indexURL: URL
     private var entries: [String: Entry] = [:]
+    private var entryAliases: [String: String] = [:]
     private var limit: Int64
     nonisolated let initialCachedTrackIDs: Set<String>
     nonisolated let initialByteCount: Int64
@@ -430,18 +431,27 @@ actor CacheStore {
     }
 
     func localURL(for track: Track) -> URL? {
-        let entryID = entries[track.id] == nil ? matchingEntryID(for: track) : track.id
+        let entryID = entries[track.id] == nil ? (entryAliases[track.id] ?? matchingEntryID(for: track)) : track.id
         guard let entryID, var entry = entries[entryID] else { return nil }
         let url = root.appending(path: entry.fileName)
         guard let size = fileSize(at: url), size > 0, size == entry.byteCount,
               track.size <= 0 || size == track.size else {
             if entryID == track.id {
                 entries.removeValue(forKey: track.id)
-                persist()
+            } else {
+                entryAliases.removeValue(forKey: track.id)
             }
+            persist()
             return nil
         }
         if entryID != track.id {
+            // Lists and playback queues can still hold an earlier TDLib ID.
+            // Keep every resolved ID attached to the single completed file.
+            for (alias, target) in entryAliases where target == entryID {
+                entryAliases[alias] = track.id
+            }
+            entryAliases[entryID] = track.id
+            entryAliases.removeValue(forKey: track.id)
             entries.removeValue(forKey: entryID)
             try? FileManager.default.removeItem(at: recordURL(for: entryID))
         }
@@ -521,13 +531,15 @@ actor CacheStore {
     }
 
     func removeCachedAudio(trackID: String) throws {
-        if let entry = entries[trackID] {
+        let entryID = entryAliases[trackID] ?? trackID
+        if let entry = entries[entryID] {
             let url = root.appending(path: entry.fileName)
             if FileManager.default.fileExists(atPath: url.path) {
                 try FileManager.default.removeItem(at: url)
             }
-            entries.removeValue(forKey: trackID)
+            entries.removeValue(forKey: entryID)
         }
+        try? FileManager.default.removeItem(at: recordURL(for: entryID))
         try? FileManager.default.removeItem(at: recordURL(for: trackID))
         let base = ".\(safeName(for: trackID))"
         let partial = PartialCacheLocation(
@@ -540,7 +552,8 @@ actor CacheStore {
     }
 
     func clearCachedAudio(except trackIDs: Set<String> = []) throws {
-        for (trackID, entry) in Array(entries) where !trackIDs.contains(trackID) {
+        let protectedIDs = trackIDs.union(trackIDs.compactMap { entryAliases[$0] })
+        for (trackID, entry) in Array(entries) where !protectedIDs.contains(trackID) {
             let url = root.appending(path: entry.fileName)
             if FileManager.default.fileExists(atPath: url.path) {
                 try FileManager.default.removeItem(at: url)
@@ -573,7 +586,7 @@ actor CacheStore {
 
     func cachedTrackIDs() -> Set<String> {
         reconcileIndex()
-        return Set(entries.keys)
+        return Set(entries.keys).union(entryAliases.keys)
     }
 
     func cachedAudioItems() -> [CachedAudioItem] {
@@ -617,6 +630,7 @@ actor CacheStore {
     }
 
     private func evictIfNeeded(preserving protectedIDs: Set<String>) {
+        let protectedIDs = protectedIDs.union(protectedIDs.compactMap { entryAliases[$0] })
         let partials = partialRecords().sorted { $0.lastAccess < $1.lastAccess }
         var total = entries.values.reduce(0) { $0 + $1.byteCount }
             + partials.reduce(0) { $0 + $1.byteCount }
@@ -713,6 +727,7 @@ actor CacheStore {
     }
 
     private func persist() {
+        entryAliases = entryAliases.filter { entries[$0.value] != nil }
         let values = entries.values.sorted { $0.trackID < $1.trackID }
         guard let data = try? JSONEncoder().encode(values) else { return }
         try? data.write(to: indexURL, options: .atomic)

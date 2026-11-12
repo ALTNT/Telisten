@@ -78,6 +78,9 @@ enum CacheStoreTests {
         refreshed.documentID = 21
         let reusedURL = await reusedCache.localURL(for: refreshed)
         precondition(reusedURL == originalURL)
+        let reusedIDs = await reusedCache.cachedTrackIDs()
+        precondition(reusedIDs == [original.id, refreshed.id],
+                     "Refreshing a TDLib ID must not hide the cached badge on an older list row")
         let reusedAfterLaunch = CacheStore(rootURL: reusedRoot)
         precondition(reusedAfterLaunch.initialCachedTrackIDs == [refreshed.id],
                      "An audio file reused under a new ID must only be recovered once")
@@ -107,9 +110,47 @@ enum CacheStoreTests {
         precondition(originalAgain == originalURL, "Both TDLib IDs must reuse the same local audio")
         let originalAfterLaunch = CacheStore(rootURL: reusedRoot)
         precondition(originalAfterLaunch.initialCachedTrackIDs == [original.id])
+        _ = await originalAfterLaunch.localURL(for: refreshed)
         try await originalAfterLaunch.remove(original)
         precondition(!fm.fileExists(atPath: originalURL.path))
+        let removedIDs = await originalAfterLaunch.cachedTrackIDs()
+        precondition(removedIDs.isEmpty, "Removing through an earlier ID must clear every cached alias")
         precondition(CacheStore(rootURL: reusedRoot).initialCachedTrackIDs.isEmpty)
+
+        // Repeated ID changes must keep all visible rows associated with one file.
+        let aliasesRoot = sandbox.appending(path: "cached-aliases")
+        let aliasesCache = CacheStore(rootURL: aliasesRoot)
+        let aliasTemporary = await aliasesCache.partialLocation(for: original).dataURL
+        try audio.write(to: aliasTemporary)
+        let aliasURL = try await aliasesCache.commit(aliasTemporary, track: original)
+        var latest = refreshed
+        latest.documentID = 22
+        for value in [refreshed, latest, original] {
+            let resolved = await aliasesCache.localURL(for: value)
+            precondition(resolved == aliasURL)
+        }
+        let aliasIDs: Set<String> = [original.id, refreshed.id, latest.id]
+        let allAliasIDs = await aliasesCache.cachedTrackIDs()
+        let aliasItems = await aliasesCache.cachedAudioItems()
+        let aliasBytes = await aliasesCache.totalBytes()
+        precondition(allAliasIDs == aliasIDs)
+        precondition(aliasItems.count == 1 && aliasBytes == original.size,
+                     "Cached aliases must not duplicate cache rows or byte counts")
+        try await aliasesCache.clearCachedAudio(except: [refreshed.id])
+        let preservedAliasIDs = await aliasesCache.cachedTrackIDs()
+        precondition(preservedAliasIDs == aliasIDs,
+                     "A protected playback ID must preserve its file and all cached aliases")
+        try await aliasesCache.clearCachedAudio()
+        let clearedAliasIDs = await aliasesCache.cachedTrackIDs()
+        precondition(clearedAliasIDs.isEmpty && !fm.fileExists(atPath: aliasURL.path))
+
+        // Files removed outside the app must also invalidate their aliases.
+        try audio.write(to: aliasTemporary)
+        let missingURL = try await aliasesCache.commit(aliasTemporary, track: original)
+        _ = await aliasesCache.localURL(for: refreshed)
+        try fm.removeItem(at: missingURL)
+        let missingIDs = await aliasesCache.cachedTrackIDs()
+        precondition(missingIDs.isEmpty, "Missing files must not leave cached aliases behind")
 
         // Cold-cache playback and a download started immediately must share
         // in-flight range requests and produce one complete audio file.
@@ -193,9 +234,15 @@ enum CacheStoreTests {
             try handle.truncate(atOffset: UInt64(large.size))
             try handle.close()
             _ = try await bounded.commit(staging, track: large)
+            var alias = large
+            alias.documentID += 100
+            _ = await bounded.localURL(for: alias)
         }
-        precondition(CacheStore(rootURL: boundedRoot).initialCachedTrackIDs == [track(11).id],
+        let boundedIDs = await bounded.cachedTrackIDs()
+        precondition(boundedIDs == [track(11).id, track(111).id],
+                     "Eviction must clear every alias of the removed file")
+        precondition(CacheStore(rootURL: boundedRoot).initialCachedTrackIDs == [track(111).id],
                      "Eviction must remove recovery records so evicted downloads do not reappear")
-        print("PASS: durable downloads, migration, orphan recovery, relaunch, lost index, metadata recovery, reused audio deduplication, duplicate index repair, concurrent cold-cache playback/download, partial resume, deletion, truncated files, container relocation")
+        print("PASS: durable downloads, migration, orphan recovery, relaunch, lost index, metadata recovery, reused audio deduplication, cached ID aliases, alias deletion/clear/protection/eviction, missing files, duplicate index repair, concurrent cold-cache playback/download, partial resume, deletion, truncated files, container relocation")
     }
 }

@@ -42,6 +42,7 @@ final class AudioPlayer: ObservableObject {
     private var statusObservation: NSKeyValueObservation?
     private var timeControlObservation: NSKeyValueObservation?
     private var streamingResource: StreamingAudioResource?
+    private var streamingLoadTask: Task<Void, Never>?
     private let resourceLoaderQueue = DispatchQueue(label: "ad.neko.player.resource-loader")
     private var wantsPlayback = false
     private var volumeBeforeMute: Float = 1
@@ -71,6 +72,8 @@ final class AudioPlayer: ObservableObject {
     func load(_ track: Track, from url: URL, autoplay: Bool = true) {
         guard self.track?.id == track.id else { return }
         let startAt = currentTime
+        streamingLoadTask?.cancel()
+        streamingLoadTask = nil
         streamingResource?.cancelAll()
         streamingResource = nil
         install(AVPlayerItem(url: url), track: track, autoplay: autoplay, startAt: startAt)
@@ -82,18 +85,45 @@ final class AudioPlayer: ObservableObject {
         autoplay: Bool = true
     ) {
         guard self.track?.id == track.id else { return }
+        streamingLoadTask?.cancel()
         streamingResource?.cancelAll()
         let resource = StreamingAudioResource(fileSize: track.size, mimeType: track.mimeType, provider: provider)
         streamingResource = resource
         let fileExtension = (track.fileName as NSString).pathExtension
         let suffix = fileExtension.isEmpty ? "audio" : fileExtension
         let url = URL(string: "telisten-stream://track/\(track.documentID).\(suffix)")!
+        PlaybackDiagnostics.log("stream_start track=\(track.id) url=\(url.absoluteString) size=\(track.size) mime=\(track.mimeType)")
         let asset = AVURLAsset(
             url: url,
             options: [AVURLAssetPreferPreciseDurationAndTimingKey: false]
         )
         asset.resourceLoader.setDelegate(resource, queue: resourceLoaderQueue)
-        install(AVPlayerItem(asset: asset), track: track, autoplay: autoplay)
+        wantsPlayback = autoplay
+        isPlaying = false
+        isLoading = autoplay
+        updateNowPlaying()
+        // Preparing a remote asset synchronously can block the main thread
+        // before the shared download task has a chance to start.
+        streamingLoadTask = Task { [weak self] in
+            do {
+                let (isPlayable, _) = try await asset.load(.isPlayable, .duration)
+                guard let self, !Task.isCancelled,
+                      self.track?.id == track.id, self.streamingResource === resource else { return }
+                self.streamingLoadTask = nil
+                guard isPlayable else { throw AVError(.fileFormatNotRecognized) }
+                self.install(
+                    AVPlayerItem(asset: asset, automaticallyLoadedAssetKeys: ["playable", "duration"]),
+                    track: track, autoplay: self.wantsPlayback, startAt: self.currentTime
+                )
+            } catch {
+                guard let self, !Task.isCancelled,
+                      self.track?.id == track.id, self.streamingResource === resource else { return }
+                self.streamingLoadTask = nil
+                PlaybackDiagnostics.log("stream_prepare_failed track=\(track.id)", error: error)
+                self.failLoading()
+                self.onError?("This track could not be played. \(error.localizedDescription)")
+            }
+        }
     }
 
     func failLoading() {
@@ -107,6 +137,8 @@ final class AudioPlayer: ObservableObject {
         guard canRecoverFromCachedFile(track),
               player.timeControlStatus != .playing else { return }
         let startAt = currentTime
+        streamingLoadTask?.cancel()
+        streamingLoadTask = nil
         streamingResource?.cancelAll()
         streamingResource = nil
         install(AVPlayerItem(url: url), track: track, autoplay: true, startAt: startAt)
@@ -124,6 +156,7 @@ final class AudioPlayer: ObservableObject {
         currentTime = max(0, startAt)
         pendingStartTime = startAt > 0 ? startAt : nil
         wantsPlayback = autoplay
+        isPlaying = false
         isLoading = autoplay
         item.preferredForwardBufferDuration = 2
         player.replaceCurrentItem(with: item)
@@ -145,23 +178,23 @@ final class AudioPlayer: ObservableObject {
                                       self.player.currentItem === item,
                                       self.track?.id == track.id else { return }
                                 self.currentTime = startTime
-                                self.isLoading = false
                                 if self.wantsPlayback {
                                     self.player.play()
-                                    self.isPlaying = true
                                 }
-                                self.updateNowPlaying()
+                                self.updatePlaybackState()
                             }
                         }
                     } else {
-                        self.isLoading = false
                         if self.wantsPlayback {
                             self.player.play()
-                            self.isPlaying = true
                         }
-                        self.updateNowPlaying()
+                        self.updatePlaybackState()
                     }
                 case .failed:
+                    PlaybackDiagnostics.log("player_failed track=\(track.id) streaming=\(self.streamingResource != nil) size=\(track.size) mime=\(track.mimeType)", error: item.error)
+                    for event in item.errorLog()?.events.suffix(5) ?? [] {
+                        PlaybackDiagnostics.log("player_error_log track=\(track.id) domain=\(event.errorDomain) code=\(event.errorStatusCode) comment=\(event.errorComment ?? "none")")
+                    }
                     let reason = item.error?.localizedDescription ?? "The audio format is not supported on this device."
                     self.failLoading()
                     self.onError?("This track could not be played. \(reason)")
@@ -186,22 +219,28 @@ final class AudioPlayer: ObservableObject {
                 self.onFinished?()
             }
         }
-        updateNowPlaying()
         if autoplay && pendingStartTime == nil { player.play() }
+        updatePlaybackState()
     }
 
     func play() {
         guard let item = player.currentItem else {
+            if streamingLoadTask != nil {
+                activateAudioSession()
+                wantsPlayback = true
+                isLoading = true
+                updateNowPlaying()
+                return
+            }
             if track != nil, !isLoading { onPlayRequested?() }
             return
         }
         guard item.status != .failed else { return }
         activateAudioSession()
         wantsPlayback = true
+        isLoading = true
         player.play()
-        isPlaying = true
-        isLoading = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
-        updateNowPlaying()
+        updatePlaybackState()
     }
 
     func pause() {
@@ -235,7 +274,7 @@ final class AudioPlayer: ObservableObject {
     }
 
     func toggle() {
-        isPlaying ? pause() : play()
+        isPlaying || isLoading ? pause() : play()
     }
 
     func toggleMute() {
@@ -281,7 +320,9 @@ final class AudioPlayer: ObservableObject {
                 // may have been queued immediately before a track switch.
                 let seconds = self.player.currentTime().seconds
                 self.currentTime = max(0, seconds.isFinite ? seconds : 0)
-                if let itemDuration = self.player.currentItem?.duration.seconds, itemDuration.isFinite {
+                if let item = self.player.currentItem, item.status == .readyToPlay,
+                   item.duration.seconds.isFinite {
+                    let itemDuration = item.duration.seconds
                     self.duration = max(0, itemDuration)
                 }
                 self.updateNowPlaying()
@@ -293,22 +334,19 @@ final class AudioPlayer: ObservableObject {
         timeControlObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
             Task { @MainActor in
                 guard let self else { return }
-                switch player.timeControlStatus {
-                case .playing:
-                    self.isPlaying = true
-                    self.isLoading = false
-                case .waitingToPlayAtSpecifiedRate:
-                    self.isPlaying = self.wantsPlayback
-                    self.isLoading = self.wantsPlayback
-                case .paused:
-                    self.isPlaying = false
-                    if !self.wantsPlayback { self.isLoading = false }
-                @unknown default:
-                    break
-                }
-                self.updateNowPlaying()
+                self.updatePlaybackState()
             }
         }
+    }
+
+    private func updatePlaybackState() {
+        isPlaying = wantsPlayback && player.timeControlStatus == .playing
+        if isPlaying || !wantsPlayback || player.currentItem?.status == .failed {
+            isLoading = false
+        } else if player.timeControlStatus == .waitingToPlayAtSpecifiedRate {
+            isLoading = true
+        }
+        updateNowPlaying()
     }
 
     private func clearCurrentItem() {
@@ -316,6 +354,8 @@ final class AudioPlayer: ObservableObject {
         endObserver = nil
         statusObservation = nil
         pendingStartTime = nil
+        streamingLoadTask?.cancel()
+        streamingLoadTask = nil
         streamingResource?.cancelAll()
         streamingResource = nil
         player.pause()

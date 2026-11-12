@@ -114,7 +114,6 @@ final class AppModel: ObservableObject {
     private let listenTogetherBroadcaster = ListenTogetherBroadcaster()
     private var downloadTasks: [String: Task<URL, Error>] = [:]
     private var activeTransfers: [String: ProgressiveAudioTransfer] = [:]
-    private var cacheStatusCheckedTrackIDs: Set<String> = []
     private var pendingDownloadResumeIDs: Set<String> = []
     private var resumingDownloadIDs: Set<String> = []
     private var artworkLoading: Set<String> = []
@@ -1671,6 +1670,7 @@ final class AppModel: ObservableObject {
     }
 
     func refreshCacheUsage() async {
+        await reconcileCachedTracks(tracks.filter { !cachedIDs.contains($0.id) })
         let actualCachedIDs = await cache.cachedTrackIDs()
         let cacheItems = await cache.cachedAudioItems()
         cachedAudioItems = cacheItems.map { item in
@@ -1902,7 +1902,9 @@ final class AppModel: ObservableObject {
     }
 
     private func prepareAndPlay(_ track: Track) async {
+        PlaybackDiagnostics.log("playback_start track=\(track.id) size=\(track.size) mime=\(track.mimeType)")
         if let url = await cache.localURL(for: track) {
+            PlaybackDiagnostics.log("playback_cache_hit track=\(track.id)")
             guard !Task.isCancelled, player.track?.id == track.id else { return }
             cachedIDs.insert(track.id)
             downloads[track.id] = DownloadStatus(progress: 1, isCached: true)
@@ -1910,6 +1912,7 @@ final class AppModel: ObservableObject {
             persistLibrary()
             player.load(track, from: url)
         } else {
+            PlaybackDiagnostics.log("playback_cache_miss track=\(track.id)")
             guard !Task.isCancelled, player.track?.id == track.id else { return }
             if cachedIDs.remove(track.id) != nil {
                 if downloads[track.id]?.isCached == true {
@@ -1943,10 +1946,11 @@ final class AppModel: ObservableObject {
             } catch is CancellationError {
                 return
             } catch {
+                PlaybackDiagnostics.log("playback_download_failed track=\(track.id) previousPlayerError=\(fallbackError ?? "none")", error: error)
                 if self.player.track?.id == track.id,
                    fallbackError != nil || self.player.isLoading {
                     self.player.failLoading()
-                    self.errorMessage = fallbackError ?? UserFacingError.message(for: error)
+                    self.errorMessage = UserFacingError.message(for: error)
                 }
                 return
             }
@@ -2000,6 +2004,7 @@ final class AppModel: ObservableObject {
         )
         persistLibrary()
         let cache = cache
+        PlaybackDiagnostics.log("download_start track=\(track.id) size=\(track.size) mime=\(track.mimeType)")
         let task = Task<URL, Error> {
             // Register the task before suspending to resolve its Telegram source.
             // Playback and Download All must share one transfer/commit per file.
@@ -2018,6 +2023,8 @@ final class AppModel: ObservableObject {
             }
             let destination = try await cache.commit(temporary, track: track)
             await transfer.didCommit(to: destination)
+            // Resume a waiting stream before cache refresh or lyric extraction.
+            player.useCachedFileIfNeeded(track, from: destination)
             return destination
         }
         downloadTasks[track.id] = task
@@ -2029,6 +2036,7 @@ final class AppModel: ObservableObject {
         }
         do {
             let url = try await task.value
+            PlaybackDiagnostics.log("download_complete track=\(track.id) size=\(track.size)")
             cachedIDs.insert(track.id)
             clearPendingDownloadResumeID(track.id)
             downloads[track.id] = DownloadStatus(progress: 1, isCached: true)
@@ -2040,6 +2048,7 @@ final class AppModel: ObservableObject {
             await useEmbeddedLyrics(for: track, at: url)
             return url
         } catch {
+            PlaybackDiagnostics.log("download_failed track=\(track.id) progress=\(downloads[track.id]?.progress ?? 0) size=\(track.size)", error: error)
             cacheBytes = await cache.totalBytes()
             downloads[track.id] = DownloadStatus(
                 progress: downloads[track.id]?.progress ?? 0,
@@ -2669,7 +2678,7 @@ final class AppModel: ObservableObject {
                 }
             }
             knownTracks[track.id] = track
-            if !cachedIDs.contains(track.id), cacheStatusCheckedTrackIDs.insert(track.id).inserted {
+            if !cachedIDs.contains(track.id) {
                 cacheCandidates.append(track)
             }
             voteStates[track.id] = VoteState(
@@ -3370,7 +3379,6 @@ final class AppModel: ObservableObject {
 
     private func restoreLibrary() {
         let defaults = UserDefaults.standard
-        cacheStatusCheckedTrackIDs.removeAll()
         pendingDownloadResumeIDs = Set(
             defaults.stringArray(forKey: accountStorageKey("downloads.pendingResume")) ?? []
         )

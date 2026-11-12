@@ -1038,6 +1038,7 @@ actor TelegramService {
     ) async throws -> Data {
         guard requestedOffset >= 0,
               let fileID = await resolvedFileID(for: track) else {
+            PlaybackDiagnostics.log("telegram_resolve_failed track=\(track.id) offset=\(requestedOffset) length=\(requestedLength)", error: ServiceError.incompleteDownload)
             throw ServiceError.incompleteDownload
         }
         if requestedLength <= 0 { return Data() }
@@ -1049,9 +1050,14 @@ actor TelegramService {
                 priority: priority
             )
         } catch {
+            PlaybackDiagnostics.log("telegram_stream_failed track=\(track.id) fileID=\(fileID) offset=\(requestedOffset) length=\(requestedLength) priority=\(priority)", error: error)
             guard isFileNotFound(error) || isIncompleteDownload(error),
                   let latestFileID = await refreshedFileID(for: track),
-                  latestFileID != fileID else { throw readableDownloadError(error) }
+                  latestFileID != fileID else {
+                PlaybackDiagnostics.log("telegram_refresh_unavailable track=\(track.id) fileID=\(fileID)")
+                throw readableDownloadError(error)
+            }
+            PlaybackDiagnostics.log("telegram_refresh_file track=\(track.id) oldFileID=\(fileID) newFileID=\(latestFileID)")
             refreshedFileIDs[track.id] = latestFileID
             do {
                 return try await downloadFile(
@@ -1061,6 +1067,7 @@ actor TelegramService {
                     priority: priority
                 )
             } catch {
+                PlaybackDiagnostics.log("telegram_retry_failed track=\(track.id) fileID=\(latestFileID) offset=\(requestedOffset) length=\(requestedLength)", error: error)
                 throw readableDownloadError(error)
             }
         }
@@ -1397,6 +1404,7 @@ actor TelegramService {
             await fileDownloadGate.acquire(fileID: fileID, priority: priority)
             do {
                 try Task.checkCancellation()
+                PlaybackDiagnostics.log("telegram_range_start fileID=\(fileID) offset=\(offset) length=\(limit) priority=\(priority) retry=\(cancellationRetries)")
                 let file = try await client.downloadFile(
                     fileId: fileID,
                     limit: limit,
@@ -1409,6 +1417,7 @@ actor TelegramService {
                     data = try readLocalFile(file, offset: offset, limit: limit)
                 } catch let error as ServiceError {
                     guard isIncompleteDownload(error), limit > 0 else { throw error }
+                    PlaybackDiagnostics.log("telegram_range_incomplete fileID=\(fileID) offset=\(offset) length=\(limit) retryFullDownload=true", error: error)
                     try Task.checkCancellation()
                     let completeFile = try await client.downloadFile(
                         fileId: fileID,
@@ -1419,9 +1428,13 @@ actor TelegramService {
                     )
                     data = try readLocalFile(completeFile, offset: offset, limit: limit)
                 }
+                PlaybackDiagnostics.log("telegram_range_complete fileID=\(fileID) offset=\(offset) length=\(limit) received=\(data.count)")
                 await fileDownloadGate.release(fileID: fileID)
                 return data
             } catch {
+                let tdlibCode = (error as? TDLibKit.Error).map { String($0.code) } ?? "none"
+                let tdlibMessage = (error as? TDLibKit.Error)?.message ?? "none"
+                PlaybackDiagnostics.log("telegram_range_failed fileID=\(fileID) offset=\(offset) length=\(limit) priority=\(priority) retry=\(cancellationRetries) tdlibCode=\(tdlibCode) tdlibMessage=\(tdlibMessage)", error: error)
                 await fileDownloadGate.release(fileID: fileID)
                 guard isDownloadCancelled(error), cancellationRetries < 2 else {
                     throw readableDownloadError(error)
@@ -1434,6 +1447,7 @@ actor TelegramService {
     }
 
     private func readLocalFile(_ file: File, offset: Int64, limit: Int64) throws -> Data {
+        PlaybackDiagnostics.log("telegram_local_file fileID=\(file.id) offset=\(offset) length=\(limit) size=\(file.size) expectedSize=\(file.expectedSize) completed=\(file.local.isDownloadingCompleted) active=\(file.local.isDownloadingActive) downloadOffset=\(file.local.downloadOffset) prefixSize=\(file.local.downloadedPrefixSize) pathEmpty=\(file.local.path.isEmpty) exists=\(!file.local.path.isEmpty && FileManager.default.fileExists(atPath: file.local.path))")
         guard !file.local.path.isEmpty,
               offset >= 0,
               limit >= 0,
@@ -1445,6 +1459,7 @@ actor TelegramService {
               let fileSize = values.fileSize else {
             throw ServiceError.incompleteDownload
         }
+        PlaybackDiagnostics.log("telegram_local_bytes fileID=\(file.id) diskSize=\(fileSize) offset=\(offset) length=\(limit)")
         let availableEnd = file.local.downloadOffset.addingReportingOverflow(file.local.downloadedPrefixSize)
         let requestedCount = limit == 0 ? Int64(fileSize) - offset : limit
         let requestedEnd = offset.addingReportingOverflow(requestedCount)
