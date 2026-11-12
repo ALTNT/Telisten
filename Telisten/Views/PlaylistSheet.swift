@@ -12,6 +12,11 @@ struct PlaylistSheet: View {
             ScrollView {
                 VStack(spacing: 18) {
                     header
+                    FavoritesPlaylistButton {
+                        model.addFavorites([track])
+                        dismiss()
+                    }
+                    .disabled(model.isSavingToPlaylist)
                     if !model.playlists.isEmpty {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("YOUR PLAYLISTS")
@@ -36,13 +41,14 @@ struct PlaylistSheet: View {
                 .padding(.vertical, 14)
             }
             .background(Color.telistenBackground)
-            .navigationTitle("Add to Playlist")
+            .navigationTitle("Add to…")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
             }
             .interactiveDismissDisabled(model.isSavingToPlaylist)
+            .onChange(of: model.activeAccountID) { _ in dismiss() }
         }
         .frame(minWidth: 360, minHeight: 480)
     }
@@ -58,7 +64,7 @@ struct PlaylistSheet: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                Text("The original Telegram message will be forwarded.")
+                Text("Adding to a playlist forwards the original Telegram message.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -173,8 +179,19 @@ struct BatchPlaylistSheet: View {
                     if let saveError {
                         Text(saveError).font(.caption).foregroundStyle(.red)
                     }
-                    Text("YOUR PLAYLISTS")
-                        .font(.caption.weight(.bold)).foregroundStyle(.secondary)
+                    FavoritesPlaylistButton {
+                        guard model.activeAccountID == accountID else { return }
+                        let tracks = remainingTracks
+                        model.addFavorites(tracks)
+                        remainingTracks.removeAll()
+                        for track in tracks { onSaved(track.id) }
+                        dismiss()
+                    }
+                    .disabled(isSaving || model.isSavingToPlaylist)
+                    if !model.playlists.isEmpty {
+                        Text("YOUR PLAYLISTS")
+                            .font(.caption.weight(.bold)).foregroundStyle(.secondary)
+                    }
                     ForEach(model.playlists) { playlist in
                         Button { save(to: playlist) } label: {
                             HStack(spacing: 12) {
@@ -204,7 +221,7 @@ struct BatchPlaylistSheet: View {
                 .padding(20)
             }
             .background(Color.telistenBackground)
-            .navigationTitle("Add to Playlist")
+            .navigationTitle("Add to…")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }.disabled(isSaving)
@@ -262,5 +279,28 @@ struct BatchPlaylistSheet: View {
             saveError = String(format: localizedUI("%lld songs could not be added. Retry the remaining songs."), Int64(remainingTracks.count))
             if let failure { saveError = "\(saveError ?? "")\n\(localizedUI(failure))" }
         }
+    }
+}
+
+private struct FavoritesPlaylistButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: "heart.fill")
+                    .foregroundStyle(.red)
+                    .frame(width: 34, height: 34)
+                    .background(Color.red.opacity(0.1), in: Circle())
+                Text("Favorites").foregroundStyle(.primary)
+                Spacer()
+                Image(systemName: "chevron.right").foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .overlay(alignment: .bottom) { Divider() }
+        }
+        .buttonStyle(.plain)
     }
 }

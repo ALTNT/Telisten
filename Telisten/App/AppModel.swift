@@ -58,6 +58,7 @@ final class AppModel: ObservableObject {
     @Published var downloads: [String: DownloadStatus] = [:]
     @Published var cachedIDs: Set<String> = []
     @Published var favorites: Set<String> = []
+    @Published var favoritesMessage: String?
     @Published var knownTracks: [String: Track] = [:]
     @Published var artworkData: [String: Data] = [:]
     @Published var chatAvatarData: [String: Data] = [:]
@@ -616,7 +617,7 @@ final class AppModel: ObservableObject {
             selectedChat = nil
             let favoriteTracks = favorites.compactMap { knownTracks[$0] }.sorted { $0.date > $1.date }
             install(favoriteTracks)
-            tracks = favoriteTracks
+            tracks = favorites.compactMap { knownTracks[$0] }.sorted { $0.date > $1.date }
         case .downloads:
             isGlobalSearch = false
             selectedChat = nil
@@ -1619,8 +1620,9 @@ final class AppModel: ObservableObject {
 
     func toggleFavorite(_ track: Track) {
         knownTracks[track.id] = track
-        if favorites.contains(track.id) {
-            favorites.remove(track.id)
+        let matchingIDs = favoriteIDs(matching: track)
+        if !matchingIDs.isEmpty {
+            favorites.subtract(matchingIDs)
         } else {
             favorites.insert(track.id)
         }
@@ -1628,10 +1630,58 @@ final class AppModel: ObservableObject {
         if selected == .favorites { tracks = favorites.compactMap { knownTracks[$0] } }
     }
 
+    func addFavorites(_ tracks: [Track]) {
+        var addedCount = 0
+        for track in tracks {
+            knownTracks[track.id] = track
+            if !isFavorite(track) {
+                favorites.insert(track.id)
+                addedCount += 1
+            }
+        }
+        persistLibrary()
+        if selected == .favorites { self.tracks = favorites.compactMap { knownTracks[$0] } }
+        favoritesMessage = addedCount == 0
+            ? localizedUI("All selected songs are already in Favorites.")
+            : String(format: localizedUI("Added %lld songs to Favorites."), Int64(addedCount))
+    }
+
     func removeFavorites(_ tracks: [Track]) {
-        favorites.subtract(tracks.map(\.id))
+        for track in tracks {
+            favorites.subtract(favoriteIDs(matching: track))
+        }
         persistLibrary()
         if selected == .favorites { self.tracks.removeAll { !favorites.contains($0.id) } }
+    }
+
+    func isFavorite(_ track: Track) -> Bool {
+        !favoriteIDs(matching: track).isEmpty
+    }
+
+    private func favoriteIDs(matching track: Track) -> Set<String> {
+        Set(favorites.filter { id in
+            id == track.id || knownTracks[id].map { sameDownloadedTrack($0, track) } == true
+        })
+    }
+
+    private func normalizeFavorites() {
+        var uniqueIDs = favorites
+        let values = favorites.compactMap { knownTracks[$0] }.sorted { $0.date > $1.date }
+        for track in values where uniqueIDs.contains(track.id) {
+            var matchingIDs: Set<String> = [track.id]
+            var pending = [track]
+            while let candidate = pending.popLast() {
+                let additionalIDs = favoriteIDs(matching: candidate).subtracting(matchingIDs)
+                matchingIDs.formUnion(additionalIDs)
+                pending.append(contentsOf: additionalIDs.compactMap { knownTracks[$0] })
+            }
+            uniqueIDs.subtract(matchingIDs.subtracting([track.id]))
+        }
+        guard uniqueIDs != favorites else { return }
+        favorites = uniqueIDs
+        if selected == .favorites {
+            tracks = favorites.compactMap { knownTracks[$0] }.sorted { $0.date > $1.date }
+        }
     }
 
     func cacheTracks(_ tracks: [Track]) {
@@ -3481,6 +3531,7 @@ final class AppModel: ObservableObject {
         playlistFolderName = defaults.string(forKey: accountStorageKey("playlist.folderName"))
             .flatMap(PlaylistFolderConfiguration.normalizedName) ?? PlaylistFolderConfiguration.defaultName
         favorites = []
+        favoritesMessage = nil
         knownTracks = [:]
         queue = []
         musicChatIndex = [:]
@@ -3552,10 +3603,12 @@ final class AppModel: ObservableObject {
             knownTracks[track.id] = track
         }
         allChats = mergedChats(allChats, with: playlists)
+        normalizeFavorites()
         reconcileSharedDownloads(with: cachedIDs)
     }
 
     private func persistLibrary() {
+        normalizeFavorites()
         let favoriteIDs = Array(favorites)
         let tracks = Array(knownTracks.values)
         let queuedTracks = queue

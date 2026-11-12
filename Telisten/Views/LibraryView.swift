@@ -137,6 +137,24 @@ struct LibraryView: View {
                 SettingsView(model: model)
             }
             #endif
+            .overlay(alignment: .top) {
+                if let message = model.favoritesMessage {
+                    Text(message)
+                        .font(.callout)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        .padding()
+                        .allowsHitTesting(false)
+                        .accessibilityAddTraits(.updatesFrequently)
+                }
+            }
+            .task(id: model.favoritesMessage) {
+                guard model.favoritesMessage != nil else { return }
+                do { try await Task.sleep(for: .seconds(3)) }
+                catch { return }
+                model.favoritesMessage = nil
+            }
             .sheet(isPresented: $model.showPlaylistSheet) {
                 if let track = model.playlistTrack {
                     PlaylistSheet(model: model, track: track)
@@ -747,7 +765,7 @@ struct LibraryView: View {
                 if let first = values.first { model.play(first, from: values) }
                 finishSelectingTracks()
             }
-            batchAction("Add to playlist", symbol: "text.badge.plus") {
+            batchAction("Add to…", symbol: "text.badge.plus") {
                 batchPlaylistSelection = BatchPlaylistSelection(tracks: selectedTracks)
             }
             batchAction("Download", symbol: "arrow.down.circle") {
@@ -1100,7 +1118,7 @@ private struct TrackRow: View {
         .listRowSeparator(.hidden)
         .contextMenu {
             Button("Play", systemImage: "play.fill") { model.play(track) }
-            Button("Add to playlist", systemImage: "text.badge.plus") { model.openPlaylistPicker(for: track) }
+            Button("Add to…", systemImage: "text.badge.plus") { model.openPlaylistPicker(for: track) }
             if model.cachedIDs.contains(track.id) {
                 Button("Remove download", systemImage: "trash", role: .destructive) { model.removeDownload(track) }
             } else {
@@ -1113,14 +1131,14 @@ private struct TrackRow: View {
         Button {
             model.toggleFavorite(track)
         } label: {
-            Image(systemName: model.favorites.contains(track.id) ? "heart.fill" : "heart")
+            Image(systemName: model.isFavorite(track) ? "heart.fill" : "heart")
                 .font(.callout)
                 .frame(width: 28, height: 28)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(model.favorites.contains(track.id) ? Color.telistenAccent : .secondary)
-        .accessibilityLabel(localizedUI(model.favorites.contains(track.id) ? "Unfavorite" : "Favorite"))
+        .foregroundStyle(model.isFavorite(track) ? Color.telistenAccent : .secondary)
+        .accessibilityLabel(localizedUI(model.isFavorite(track) ? "Unfavorite" : "Favorite"))
     }
 
     @ViewBuilder private var downloadProgress: some View {
@@ -1138,7 +1156,7 @@ private struct TrackRow: View {
 
     private var moreMenu: some View {
         Menu {
-            Button("Add to playlist", systemImage: "text.badge.plus") {
+            Button("Add to…", systemImage: "text.badge.plus") {
                 model.openPlaylistPicker(for: track)
             }
             if model.cachedIDs.contains(track.id) {
