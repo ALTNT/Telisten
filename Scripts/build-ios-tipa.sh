@@ -33,11 +33,14 @@ if [ ! -f "$framework_zip" ] || ! printf '%s  %s\n' "$framework_sha256" "$framew
   mv -f "$framework_zip.download" "$framework_zip"
 fi
 
-if [ ! -d "$framework_bundle" ]; then
+if [ ! -f "$framework_bundle/ios-arm64/TDLibFramework.framework/TDLibFramework" ]; then
   mkdir -p "$framework_artifacts_dir"
-  unzip -q -o "$framework_zip" -d "$framework_artifacts_dir"
+  unzip -q -o "$framework_zip" \
+    'TDLibFramework.xcframework/Info.plist' \
+    'TDLibFramework.xcframework/ios-arm64/*' \
+    -d "$framework_artifacts_dir"
 fi
-if [ ! -d "$framework_bundle/ios-arm64/TDLibFramework.framework" ]; then
+if [ ! -f "$framework_bundle/ios-arm64/TDLibFramework.framework/TDLibFramework" ]; then
   echo "TDLibFramework iOS arm64 slice is missing from $framework_bundle" >&2
   exit 1
 fi
