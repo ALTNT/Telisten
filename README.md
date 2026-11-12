@@ -69,4 +69,4 @@ Never commit `.env`, session data, publishing credentials, or signing keys. Nati
 
 ## License
 
-[BSD 3-Clause](LICENSE). Third-party dependencies retain their own licenses. Store screenshots and demo song references do not grant rights to the referenced music or lyrics.
+[BSD 3-Clause](LICENSE). This project is based on [iebb/Telisten](https://github.com/iebb/Telisten) and contains modifications to the upstream project; the upstream copyright notice and license terms are retained in [LICENSE](LICENSE). Third-party dependencies retain their own licenses. Store screenshots and demo song references do not grant rights to the referenced music or lyrics.
