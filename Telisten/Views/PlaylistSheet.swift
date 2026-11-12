@@ -137,3 +137,130 @@ struct PlaylistSheet: View {
         }
     }
 }
+
+struct BatchPlaylistSheet: View {
+    @ObservedObject var model: AppModel
+    let onSaved: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var remainingTracks: [Track]
+    @State private var isSaving = false
+    @State private var name = ""
+    @State private var saveError: String?
+    @State private var createdPlaylist: MusicChat?
+    private let accountID: String?
+    private let totalCount: Int
+
+    init(model: AppModel, tracks: [Track], onSaved: @escaping (String) -> Void) {
+        self.model = model
+        self.onSaved = onSaved
+        _remainingTracks = State(initialValue: tracks)
+        accountID = model.activeAccountID
+        totalCount = tracks.count
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    Text(String(format: localizedUI("%lld selected"), Int64(remainingTracks.count)))
+                        .font(.headline)
+                    Text(remainingTracks.prefix(3).map(\.displayTitle).joined(separator: " · "))
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    if isSaving {
+                        ProgressView(value: Double(totalCount - remainingTracks.count), total: Double(max(1, totalCount)))
+                            .accessibilityLabel("Adding songs…")
+                    }
+                    if let saveError {
+                        Text(saveError).font(.caption).foregroundStyle(.red)
+                    }
+                    Text("YOUR PLAYLISTS")
+                        .font(.caption.weight(.bold)).foregroundStyle(.secondary)
+                    ForEach(model.playlists) { playlist in
+                        Button { save(to: playlist) } label: {
+                            HStack(spacing: 12) {
+                                ChatAvatar(model: model, chat: playlist, size: 34, fallbackSymbol: "music.note.list")
+                                Text(playlist.title).foregroundStyle(.primary)
+                                Spacer()
+                                Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 8)
+                            .contentShape(Rectangle())
+                            .overlay(alignment: .bottom) { Divider() }
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isSaving || model.isSavingToPlaylist)
+                    }
+                    Text("NEW PLAYLIST")
+                        .font(.caption.weight(.bold)).foregroundStyle(.secondary)
+                    HStack {
+                        TextField("Playlist name", text: $name).onSubmit { create() }
+                        Button(localizedUI(createdPlaylist?.title == name.trimmingCharacters(in: .whitespacesAndNewlines) ? "Retry" : "Create")) {
+                            create()
+                        }
+                        .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    .disabled(isSaving || model.isSavingToPlaylist)
+                }
+                .padding(20)
+            }
+            .background(Color.telistenBackground)
+            .navigationTitle("Add to Playlist")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }.disabled(isSaving)
+                }
+            }
+            .interactiveDismissDisabled(isSaving)
+            .onChange(of: model.activeAccountID) { _ in dismiss() }
+        }
+        .frame(minWidth: 320, minHeight: 440)
+    }
+
+    private func save(to playlist: MusicChat) {
+        guard !isSaving, model.activeAccountID == accountID else { return }
+        isSaving = true
+        Task {
+            defer { isSaving = false }
+            await saveRemaining(to: playlist)
+        }
+    }
+
+    private func create() {
+        guard !isSaving, model.activeAccountID == accountID else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        isSaving = true
+        Task {
+            defer { isSaving = false }
+            let playlist: MusicChat?
+            if let createdPlaylist, createdPlaylist.title == trimmed {
+                playlist = createdPlaylist
+            } else {
+                playlist = await model.createPlaylist(named: trimmed)
+                createdPlaylist = playlist
+            }
+            guard model.activeAccountID == accountID else { return }
+            guard let playlist else {
+                saveError = localizedUI(model.errorMessage ?? "Could not add this song to the playlist.")
+                model.errorMessage = nil
+                return
+            }
+            await saveRemaining(to: playlist)
+        }
+    }
+
+    private func saveRemaining(to playlist: MusicChat) async {
+        saveError = nil
+        let failure = await model.saveTracks(remainingTracks, to: playlist) { id in
+            remainingTracks.removeAll { $0.id == id }
+            onSaved(id)
+        }
+        guard model.activeAccountID == accountID else { return }
+        if remainingTracks.isEmpty {
+            dismiss()
+        } else {
+            saveError = String(format: localizedUI("%lld songs could not be added. Retry the remaining songs."), Int64(remainingTracks.count))
+            if let failure { saveError = "\(saveError ?? "")\n\(localizedUI(failure))" }
+        }
+    }
+}

@@ -55,6 +55,11 @@ private struct PlayerWindowSizeReader: UIViewRepresentable {
 }
 #endif
 
+private struct BatchPlaylistSelection: Identifiable {
+    let id = UUID()
+    let tracks: [Track]
+}
+
 struct LibraryView: View {
     @ObservedObject var model: AppModel
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
@@ -67,6 +72,15 @@ struct LibraryView: View {
     @State private var showDeletePlaylistConfirmation = false
     @State private var isEditingPlaylist = false
     @State private var playlistTitleDraft = ""
+    @State private var isSelectingTracks = false
+    @State private var selectedTrackIDs: Set<String> = []
+    @State private var batchPlaylistSelection: BatchPlaylistSelection?
+    @State private var showBatchRemovalConfirmation = false
+    @State private var batchRemovalTracks: [Track] = []
+    @State private var batchRemovalPlaylist: MusicChat?
+    @State private var batchRemovalSource: SidebarSelection?
+    @State private var batchRemovalAccountID: String?
+    @State private var isPerformingBatchAction = false
     @FocusState private var playlistTitleFocused: Bool
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -85,10 +99,12 @@ struct LibraryView: View {
             #endif
             libraryColumns(wideLayout: wideLayout, geometry: geometry)
             .onChange(of: model.selected) { value in
+                finishSelectingTracks()
                 Task { await model.select(value) }
             }
+            .onChange(of: model.activeAccountID) { _ in finishSelectingTracks() }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if model.player.track != nil, !model.showNowPlaying {
+                if model.player.track != nil, !model.showNowPlaying, !isSelectingTracks {
                     #if os(macOS)
                     PlayerBar(
                         model: model,
@@ -125,6 +141,23 @@ struct LibraryView: View {
                 if let track = model.playlistTrack {
                     PlaylistSheet(model: model, track: track)
                 }
+            }
+            .sheet(item: $batchPlaylistSelection) { selection in
+                BatchPlaylistSheet(model: model, tracks: selection.tracks) { savedID in
+                    selectedTrackIDs.remove(savedID)
+                    if selectedTrackIDs.isEmpty { finishSelectingTracks() }
+                }
+            }
+            .confirmationDialog(
+                batchRemovalTitle,
+                isPresented: $showBatchRemovalConfirmation,
+                titleVisibility: .visible,
+                presenting: batchRemovalTracks
+            ) { _ in
+                Button("Remove", role: .destructive) { removeSelectedTracks() }
+                Button("Cancel", role: .cancel) {}
+            } message: { _ in
+                Text(batchRemovalMessage)
             }
             .sheet(isPresented: $model.showListenTogetherSheet) {
                 ListenTogetherView(model: model)
@@ -470,6 +503,7 @@ struct LibraryView: View {
 
     private var trackBrowser: some View {
         VStack(spacing: 0) {
+            if isSelectingTracks { trackSelectionHeader }
             if model.isGlobalSearch {
                 trackList(includeSearchBots: true)
             } else {
@@ -481,6 +515,9 @@ struct LibraryView: View {
                     trackList(includeSearchBots: false)
                 }
             }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if isSelectingTracks { batchActionsBar }
         }
         .navigationTitle(isEditingPlaylist && selectedPlaylist != nil ? "" : localizedUI(browserTitle))
         #if os(iOS)
@@ -502,6 +539,10 @@ struct LibraryView: View {
         )
         #endif
         .onSubmit(of: .search) { Task { await model.search() } }
+        .onChange(of: model.searchText) { _ in finishSelectingTracks() }
+        .onChange(of: model.tracks.map(\.id)) { ids in
+            selectedTrackIDs.formIntersection(ids)
+        }
         .onChange(of: model.selectedChat?.id) { _ in
             isEditingPlaylist = false
             playlistTitleDraft = selectedPlaylist?.title ?? ""
@@ -558,7 +599,7 @@ struct LibraryView: View {
             }
             #endif
             ToolbarItemGroup(placement: .primaryAction) {
-                if let playlist = selectedPlaylist {
+                if let playlist = selectedPlaylist, !isSelectingTracks {
                     if !usesListeningSpread {
                         Button(
                             model.isDownloadingAll(in: playlist) ? "Downloading" : "Download all",
@@ -597,12 +638,206 @@ struct LibraryView: View {
                         }
                         .disabled(model.isDeletingPlaylist)
                     }
-                } else if !model.isGlobalSearch {
+                } else if !model.isGlobalSearch && !isSelectingTracks {
                     Button("Refresh", systemImage: "arrow.clockwise") {
                         Task { await model.search() }
                     }
                 }
             }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    if isSelectingTracks {
+                        finishSelectingTracks()
+                    } else {
+                        selectedTrackIDs.removeAll()
+                        isSelectingTracks = true
+                    }
+                } label: {
+                    Label(localizedUI(isSelectingTracks ? "Done" : "Select songs"),
+                          systemImage: isSelectingTracks ? "checkmark" : "checklist")
+                }
+                .disabled(isPerformingBatchAction || (!isSelectingTracks && (model.tracks.isEmpty || isEditingPlaylist)))
+                .accessibilityIdentifier("tracks.select")
+            }
+    }
+
+    private var selectedTracks: [Track] {
+        model.tracks.filter { selectedTrackIDs.contains($0.id) }
+    }
+
+    private var allTracksSelected: Bool {
+        !model.tracks.isEmpty && selectedTrackIDs.isSuperset(of: model.tracks.map(\.id))
+    }
+
+    private var removableSelectedTracks: [Track] {
+        if selectedPlaylist != nil || model.selected == .favorites { return selectedTracks }
+        return selectedTracks.filter {
+            model.cachedIDs.contains($0.id) && model.downloads[$0.id]?.isDownloading != true
+        }
+    }
+
+    private var trackSelectionHeader: some View {
+        HStack {
+            Button {
+                if allTracksSelected { selectedTrackIDs.removeAll() }
+                else { selectedTrackIDs = Set(model.tracks.map(\.id)) }
+            } label: {
+                Label(localizedUI(allTracksSelected ? "Deselect all" : (model.hasMoreTracks ? "Select all shown" : "Select all")),
+                      systemImage: allTracksSelected ? "checkmark.circle.fill" : "circle")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.telistenAccent)
+            .accessibilityIdentifier("tracks.selectAll")
+            Spacer()
+            Text(String(format: localizedUI("%lld selected"), Int64(selectedTracks.count)))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color.telistenBackground)
+        .overlay(alignment: .bottom) { Divider() }
+        .disabled(isPerformingBatchAction)
+    }
+
+    private func selectableTrackRow(_ track: Track) -> some View {
+        let isSelected = selectedTrackIDs.contains(track.id)
+        return Button {
+            if isSelected { selectedTrackIDs.remove(track.id) }
+            else { selectedTrackIDs.insert(track.id) }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(isSelected ? Color.telistenAccent : .secondary)
+                    .frame(width: 24)
+                TrackArtwork(model: model, track: track, size: 44)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(track.displayTitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text("\(track.displayArtist)  •  \(DisplayFormat.duration(track.duration))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                if model.cachedIDs.contains(track.id) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                        .accessibilityLabel("Downloaded")
+                }
+            }
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
+        .listRowBackground(isSelected ? Color.telistenAccent.opacity(0.08) : Color.clear)
+        .accessibilityLabel("\(track.displayTitle), \(track.displayArtist)")
+        .accessibilityValue(localizedUI(isSelected ? "Selected" : "Not selected"))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var batchActionsBar: some View {
+        HStack(spacing: 0) {
+            batchAction("Play", symbol: "play.fill") {
+                let values = selectedTracks
+                if let first = values.first { model.play(first, from: values) }
+                finishSelectingTracks()
+            }
+            batchAction("Add to playlist", symbol: "text.badge.plus") {
+                batchPlaylistSelection = BatchPlaylistSelection(tracks: selectedTracks)
+            }
+            batchAction("Download", symbol: "arrow.down.circle") {
+                model.cacheTracks(selectedTracks)
+                finishSelectingTracks()
+            }
+            batchAction("Remove", symbol: "trash") {
+                batchRemovalTracks = removableSelectedTracks
+                batchRemovalPlaylist = selectedPlaylist
+                batchRemovalSource = model.selected
+                batchRemovalAccountID = model.activeAccountID
+                showBatchRemovalConfirmation = true
+            }
+            .disabled(removableSelectedTracks.isEmpty)
+            .opacity(removableSelectedTracks.isEmpty ? 0.35 : 1)
+        }
+        .opacity(selectedTracks.isEmpty || isPerformingBatchAction ? 0.4 : 1)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 8)
+        .background(.regularMaterial)
+        .overlay(alignment: .top) { Divider() }
+        .disabled(selectedTracks.isEmpty || isPerformingBatchAction)
+    }
+
+    private func batchAction(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 5) {
+                Image(systemName: symbol).font(.system(size: 19))
+                Text(localizedUI(title)).font(.caption)
+                    .lineLimit(2).multilineTextAlignment(.center)
+                    .frame(height: 28, alignment: .top)
+            }
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.telistenAccent)
+        .accessibilityLabel(localizedUI(title))
+    }
+
+    private var batchRemovalTitle: String {
+        localizedUI(batchRemovalPlaylist != nil ? "Remove from playlist" :
+                    (batchRemovalSource == .favorites ? "Remove from Favorites" : "Remove downloads"))
+    }
+
+    private var batchRemovalMessage: String {
+        let key = batchRemovalPlaylist != nil
+            ? "Remove %lld songs from this playlist? Their messages in this playlist will be deleted."
+            : (batchRemovalSource == .favorites
+               ? "Remove %lld songs from Favorites?"
+               : "Remove downloaded files for %lld songs? You can download them again.")
+        return String(format: localizedUI(key), Int64(batchRemovalTracks.count))
+    }
+
+    private func finishSelectingTracks() {
+        isSelectingTracks = false
+        selectedTrackIDs.removeAll()
+        batchPlaylistSelection = nil
+        showBatchRemovalConfirmation = false
+    }
+
+    private func removeSelectedTracks() {
+        guard model.activeAccountID == batchRemovalAccountID else { return }
+        let values = batchRemovalTracks
+        if let playlist = batchRemovalPlaylist {
+            let accountID = batchRemovalAccountID
+            isPerformingBatchAction = true
+            Task {
+                defer { isPerformingBatchAction = false }
+                var failedIDs: Set<String> = []
+                var failure: String?
+                for track in values {
+                    guard model.activeAccountID == accountID else { return }
+                    await model.delete(track, from: playlist)
+                    if let error = model.errorMessage {
+                        failedIDs.insert(track.id)
+                        failure = error
+                        model.errorMessage = nil
+                    }
+                }
+                guard model.activeAccountID == accountID else { return }
+                selectedTrackIDs = failedIDs
+                if failedIDs.isEmpty { finishSelectingTracks() }
+                if let failure { model.errorMessage = failure }
+            }
+        } else {
+            if batchRemovalSource == .favorites { model.removeFavorites(values) }
+            else { model.removeDownloads(values) }
+            finishSelectingTracks()
+        }
     }
 
     private var emptyTracksPlaceholder: some View {
@@ -645,10 +880,14 @@ struct LibraryView: View {
                 .listRowBackground(Color.clear)
             } else {
                 ForEach(model.tracks) { track in
-                    TrackRow(model: model, track: track)
-                        .moveDisabled(selectedPlaylist == nil)
+                    Group {
+                        if isSelectingTracks { selectableTrackRow(track) }
+                        else { TrackRow(model: model, track: track) }
+                    }
+                        .disabled(isPerformingBatchAction)
+                        .moveDisabled(selectedPlaylist == nil || isSelectingTracks)
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            if let playlist = selectedPlaylist {
+                            if let playlist = selectedPlaylist, !isSelectingTracks {
                                 Button("Delete", systemImage: "trash", role: .destructive) {
                                     Task { await model.delete(track, from: playlist) }
                                 }

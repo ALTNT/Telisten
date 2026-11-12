@@ -910,6 +910,11 @@ final class AppModel: ObservableObject {
 
     func play(_ track: Track, from list: [Track]? = nil) {
         if player.track?.id == track.id {
+            if let list {
+                queue = list
+                currentQueueIndex = list.firstIndex(where: { $0.id == track.id })
+                persistLibrary()
+            }
             if !player.isPlaying && !player.isLoading { player.play() }
             return
         }
@@ -1136,22 +1141,42 @@ final class AppModel: ObservableObject {
         guard !isSavingToPlaylist else { return false }
         isSavingToPlaylist = true
         defer { isSavingToPlaylist = false }
+        errorMessage = await saveTrack(track, to: playlist)
+        return errorMessage == nil
+    }
+
+    func saveTracks(_ tracks: [Track], to playlist: MusicChat, onSaved: (String) -> Void) async -> String? {
+        guard !isSavingToPlaylist else { return "Could not add this song to the playlist." }
+        isSavingToPlaylist = true
+        defer { isSavingToPlaylist = false }
+        let accountID = activeAccountID
+        var failure: String?
+        for track in tracks {
+            guard activeAccountID == accountID else { return "The music source is no longer available." }
+            if let error = await saveTrack(track, to: playlist) {
+                failure = error
+            } else {
+                guard activeAccountID == accountID else { return nil }
+                onSaved(track.id)
+            }
+        }
+        return failure
+    }
+
+    private func saveTrack(_ track: Track, to playlist: MusicChat) async -> String? {
         #if DEBUG
-        if isDemo { return true }
+        if isDemo { return nil }
         #endif
         guard let source = await musicSource(for: track) else {
-            errorMessage = "The music source is no longer available."
-            return false
+            return "The music source is no longer available."
         }
         do {
             try await telegram.save(track, from: source, to: playlist)
             pendingPlaylistCreationIDs.remove(playlist.id)
             mirrorSavedTrack(track, in: playlist)
-            errorMessage = nil
-            return true
+            return nil
         } catch {
-            errorMessage = UserFacingError.message(for: error)
-            return false
+            return UserFacingError.message(for: error)
         }
     }
 
@@ -1183,31 +1208,7 @@ final class AppModel: ObservableObject {
             return false
         }
         do {
-            let playlist: MusicChat
-            if let pending = playlists.first(where: {
-                pendingPlaylistCreationIDs.contains($0.id) && $0.title == trimmed
-            }) {
-                playlist = pending
-            } else {
-                playlist = try await telegram.createPlaylist(named: trimmed)
-                playlists.append(playlist)
-                allChats.append(playlist)
-                unfiledPlaylistIDs.insert(playlist.id)
-                pendingPlaylistCreationIDs.insert(playlist.id)
-                // The channel exists now. Persist it before optional folder work
-                // or forwarding can fail, so retry never recreates this channel.
-                persistLibrary()
-            }
-            if unfiledPlaylistIDs.contains(playlist.id) {
-                do {
-                    try await telegram.addToPlaylistFolder(playlist, folderName: folderName)
-                    unfiledPlaylistIDs.remove(playlist.id)
-                    persistLibrary()
-                } catch {
-                    // Folder capacity and connectivity do not invalidate a created
-                    // channel. Keep its local playlist membership and continue.
-                }
-            }
+            let playlist = try await preparePlaylist(named: trimmed, folderName: folderName)
             try await telegram.save(track, from: source, to: playlist)
             pendingPlaylistCreationIDs.remove(playlist.id)
             mirrorSavedTrack(track, in: playlist)
@@ -1218,6 +1219,60 @@ final class AppModel: ObservableObject {
             errorMessage = UserFacingError.message(for: error)
             return false
         }
+    }
+
+    func createPlaylist(named name: String) async -> MusicChat? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !isSavingToPlaylist else { return nil }
+        isSavingToPlaylist = true
+        defer { isSavingToPlaylist = false }
+        do {
+            #if DEBUG
+            if isDemo {
+                let playlist = MusicChat(
+                    id: "c:\(3_000 + playlists.count)", peerID: Int64(3_000 + playlists.count),
+                    accessHash: 1, kind: .channel, title: trimmed, username: nil
+                )
+                playlists.append(playlist)
+                allChats.append(playlist)
+                chats.append(playlist)
+                return playlist
+            }
+            #endif
+            let playlist = try await preparePlaylist(named: trimmed, folderName: playlistFolderName)
+            errorMessage = nil
+            return playlist
+        } catch {
+            errorMessage = UserFacingError.message(for: error)
+            return nil
+        }
+    }
+
+    private func preparePlaylist(named trimmed: String, folderName: String) async throws -> MusicChat {
+        let playlist: MusicChat
+        if let pending = playlists.first(where: {
+            pendingPlaylistCreationIDs.contains($0.id) && $0.title == trimmed
+        }) {
+            playlist = pending
+        } else {
+            playlist = try await telegram.createPlaylist(named: trimmed)
+            playlists.append(playlist)
+            allChats.append(playlist)
+            unfiledPlaylistIDs.insert(playlist.id)
+            pendingPlaylistCreationIDs.insert(playlist.id)
+            // Persist the channel before folder work or forwarding can fail.
+            persistLibrary()
+        }
+        if unfiledPlaylistIDs.contains(playlist.id) {
+            do {
+                try await telegram.addToPlaylistFolder(playlist, folderName: folderName)
+                unfiledPlaylistIDs.remove(playlist.id)
+                persistLibrary()
+            } catch {
+                // A full folder must not prevent saving to the created playlist.
+            }
+        }
+        return playlist
     }
 
     func deletePlaylist(_ playlist: MusicChat) async -> Bool {
@@ -1573,6 +1628,28 @@ final class AppModel: ObservableObject {
         if selected == .favorites { tracks = favorites.compactMap { knownTracks[$0] } }
     }
 
+    func removeFavorites(_ tracks: [Track]) {
+        favorites.subtract(tracks.map(\.id))
+        persistLibrary()
+        if selected == .favorites { self.tracks.removeAll { !favorites.contains($0.id) } }
+    }
+
+    func cacheTracks(_ tracks: [Track]) {
+        let accountID = activeAccountID
+        Task {
+            var failedCount = 0
+            for track in tracks {
+                guard activeAccountID == accountID else { return }
+                do { _ = try await cachedFile(for: track) }
+                catch { failedCount += 1 }
+            }
+            guard activeAccountID == accountID, failedCount > 0 else { return }
+            errorMessage = failedCount == 1
+                ? "One track could not be downloaded."
+                : String(format: localizedUI("%lld tracks could not be downloaded."), Int64(failedCount))
+        }
+    }
+
     func cacheTrack(_ track: Track) {
         Task {
             do { _ = try await cachedFile(for: track) }
@@ -1787,6 +1864,25 @@ final class AppModel: ObservableObject {
             } catch {
                 errorMessage = UserFacingError.message(for: error)
             }
+        }
+    }
+
+    func removeDownloads(_ tracks: [Track]) {
+        let accountID = activeAccountID
+        Task {
+            var failure: Error?
+            for track in tracks {
+                guard activeAccountID == accountID else { return }
+                do {
+                    try await cache.remove(track)
+                    guard activeAccountID == accountID else { return }
+                    clearPendingDownloadResumeID(track.id)
+                    downloads[track.id] = DownloadStatus.none
+                } catch { failure = error }
+            }
+            guard activeAccountID == accountID else { return }
+            await refreshCacheUsage()
+            if let failure { errorMessage = UserFacingError.message(for: failure) }
         }
     }
 
