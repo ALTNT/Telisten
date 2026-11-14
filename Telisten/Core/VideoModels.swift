@@ -77,6 +77,8 @@ struct VideoItem: Identifiable, Hashable, Sendable {
     var height: Int
     var thumbnail: Data?
     var hasComments: Bool
+    // Older or locally constructed items may not have a message timestamp.
+    var date: Date? = nil
 
     var title: String {
         let line = caption.split(separator: "\n").first.map(String.init) ?? ""

@@ -129,7 +129,8 @@ enum TelegramMapping {
             fileName: fileName, mimeType: mimeType, caption: caption,
             duration: duration, size: file.size > 0 ? file.size : file.expectedSize,
             width: width, height: height, thumbnail: thumbnail,
-            hasComments: (message.interactionInfo?.replyInfo?.replyCount ?? 0) > 0
+            hasComments: (message.interactionInfo?.replyInfo?.replyCount ?? 0) > 0,
+            date: message.date > 0 ? Date(timeIntervalSince1970: TimeInterval(message.date)) : nil
         )
     }
 

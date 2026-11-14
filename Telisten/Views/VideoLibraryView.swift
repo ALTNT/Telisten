@@ -154,8 +154,15 @@ private struct VideoChannelView: View {
                         thumbnail(displayedVideo)
                         VStack(alignment: .leading, spacing: 4) {
                             Text(displayedVideo.title).lineLimit(2).foregroundStyle(.primary)
-                            Text("\(DisplayFormat.duration(displayedVideo.duration)) · \(DisplayFormat.fileSize(displayedVideo.size))")
-                                .font(.caption).foregroundStyle(.secondary)
+                            HStack(spacing: 0) {
+                                // Use the channel post's date, even when its reply supplies the video.
+                                if let date = video.date {
+                                    Text(date, format: .dateTime.month().day())
+                                    Text(" · ")
+                                }
+                                Text("\(DisplayFormat.duration(displayedVideo.duration)) · \(DisplayFormat.fileSize(displayedVideo.size))")
+                            }
+                            .font(.caption).foregroundStyle(.secondary)
                             videoSource(video, choice: choice)
                         }
                     }
@@ -224,7 +231,12 @@ private struct VideoChannelView: View {
             }
         }
         .refreshable { await load(reset: true) }
-        #if !os(macOS)
+        #if os(iOS)
+        // Present playback directly over the library instead of stacking sheets.
+        .fullScreenCover(item: $selectedVideo) { video in
+            VideoPlaybackView(service: service, original: video, accountID: accountID, musicPlayer: musicPlayer)
+        }
+        #elseif !os(macOS)
         .sheet(item: $selectedVideo) { video in
             VideoPlaybackView(service: service, original: video, accountID: accountID, musicPlayer: musicPlayer)
         }
@@ -310,7 +322,9 @@ private struct VideoPlaybackView: View {
     @AppStorage("video.prefer1080p") private var prefer1080p = true
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
-    @State private var fullScreen = false
+    #if os(iOS)
+    @Environment(\.isPresented) private var isPresented
+    #endif
     @State private var started = false
     private var closeWindow: (() -> Void)?
 
@@ -328,11 +342,105 @@ private struct VideoPlaybackView: View {
     #endif
 
     private func closePlayback() {
+        #if os(iOS)
+        // End the session on an explicit close, before dismissing the cover.
+        playback.stop()
+        #endif
         if let closeWindow { closeWindow() }
         else { dismiss() }
     }
 
     var body: some View {
+        playbackContent
+        .task {
+            guard !started, !Task.isCancelled else { return }
+            started = true
+            playback.start(prefer1080p: prefer1080p)
+        }
+        #if os(iOS)
+        .onDisappear {
+            // AVKit full-screen presentation also hides this view. Keep its
+            // item and resource loader alive while the playback cover is open.
+            PlaybackDiagnostics.log("video_view_disappear presented=\(isPresented)")
+            if !isPresented { playback.stop() }
+        }
+        .onChange(of: isPresented) { presented in
+            // Also clean up when the cover is dismissed by its presenting view.
+            if !presented { playback.stop() }
+        }
+        #elseif !os(macOS)
+        .onDisappear { playback.stop() }
+        #endif
+        .onChange(of: musicPlayer.isPlaying) { playing in
+            if playing { playback.pause() }
+        }
+        .onReceive(playback.player.publisher(for: \.timeControlStatus).receive(on: DispatchQueue.main)) { status in
+            // Pausing an already paused music player publishes another view
+            // update and can repeatedly re-enter this KVO subscription.
+            if status == .playing, musicPlayer.isPlaying || musicPlayer.isLoading { musicPlayer.pause() }
+        }
+        #if !os(macOS)
+        .onChange(of: scenePhase) { phase in
+            if phase != .active { playback.pause() }
+        }
+        #endif
+    }
+
+    @ViewBuilder private var playbackContent: some View {
+        #if os(iOS)
+        ZStack {
+            Color.black.ignoresSafeArea()
+            // One native player owns the controls in both portrait and landscape.
+            IOSVideoSurfaceView(player: playback.player).ignoresSafeArea(.container, edges: [.horizontal, .bottom])
+            if let error = playback.errorMessage {
+                VStack(spacing: 12) {
+                    Text(error).multilineTextAlignment(.center)
+                    Button("Retry") { playback.start(prefer1080p: prefer1080p, playOriginal: playback.usingOriginal) }
+                        .buttonStyle(.borderedProminent)
+                }
+                .padding().background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                .padding()
+            } else if playback.isLoading || playback.isBuffering {
+                ProgressView(playback.isLoading ? "Preparing video…" : "Buffering video…")
+                    .padding().background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .allowsHitTesting(false)
+            }
+        }
+        // Keep the header clear of AVKit's volume and full-screen controls.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack(spacing: 12) {
+                Button { closePlayback() } label: {
+                    Image(systemName: "xmark").frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Done")
+                if let choice = playback.choice {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(choice.selected.title).font(.subheadline).lineLimit(1)
+                        if choice.selected.id != choice.original.id {
+                            Text("Playing 1080P from comments").font(.caption).foregroundStyle(.secondary)
+                        } else if choice.commentsUnavailable {
+                            Text("Comments unavailable. Playing the original video.").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        } else {
+                            Text("Playing the original video").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+                Menu {
+                    Button("Play original video") { playback.start(prefer1080p: false, playOriginal: true) }
+                } label: {
+                    Image(systemName: "ellipsis.circle").frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Play original video")
+            }
+            .padding(.horizontal, 8)
+            .background(.black)
+        }
+        .foregroundStyle(.white)
+        .tint(.white)
+        .preferredColorScheme(.dark)
+        .statusBarHidden()
+        #else
         NavigationStack {
             VStack(spacing: 12) {
                 #if os(macOS)
@@ -356,49 +464,34 @@ private struct VideoPlaybackView: View {
                 }
                 HStack {
                     Button("Play original video") { playback.start(prefer1080p: false, playOriginal: true) }
-                    #if os(iOS)
-                    Button("Full screen") { fullScreen = true }
-                    #endif
                 }
             }
             .padding()
             .navigationTitle("Video playback")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { closePlayback() } } }
         }
-        .task {
-            guard !started, !Task.isCancelled else { return }
-            started = true
-            playback.start(prefer1080p: prefer1080p)
-        }
-        #if !os(macOS)
-        .onDisappear { if !fullScreen { playback.stop() } }
-        #endif
-        .onChange(of: musicPlayer.isPlaying) { playing in
-            if playing { playback.pause() }
-        }
-        .onReceive(playback.player.publisher(for: \.timeControlStatus).receive(on: DispatchQueue.main)) { status in
-            // Pausing an already paused music player publishes another view
-            // update and can repeatedly re-enter this KVO subscription.
-            if status == .playing, musicPlayer.isPlaying || musicPlayer.isLoading { musicPlayer.pause() }
-        }
-        #if !os(macOS)
-        .onChange(of: scenePhase) { phase in
-            if phase != .active { playback.pause() }
-        }
-        #endif
-        #if os(iOS)
-        .fullScreenCover(isPresented: $fullScreen) {
-            ZStack(alignment: .topTrailing) {
-                Color.black.ignoresSafeArea()
-                VideoPlayer(player: playback.player).ignoresSafeArea()
-                Button("Done") { fullScreen = false }.padding().buttonStyle(.borderedProminent)
-            }
-        }
-        #else
         .frame(minWidth: 760, minHeight: 540)
         #endif
     }
 }
+
+#if os(iOS)
+private struct IOSVideoSurfaceView: UIViewControllerRepresentable {
+    let player: AVPlayer
+
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
+        controller.player = player
+        controller.videoGravity = .resizeAspect
+        controller.showsPlaybackControls = true
+        return controller
+    }
+
+    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
+        if controller.player !== player { controller.player = player }
+    }
+}
+#endif
 
 #if os(macOS)
 @MainActor
