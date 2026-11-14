@@ -99,9 +99,21 @@ struct VideoItem: Identifiable, Hashable, Sendable {
 
     var is1080p: Bool {
         // Real dimensions take priority: 4K posts often mention a 1080P copy.
-        if width > 0, height > 0 { return (1_000...1_100).contains(min(width, height)) }
+        if width > 0, height > 0 {
+            let short = min(width, height)
+            let long = max(width, height)
+            // Widescreen releases can crop the black bars to 1920 x 804.
+            return long <= 1920 && ((1_000...1_100).contains(short)
+                || (long == 1920 && (720...1080).contains(short)))
+        }
+        return has1080pLabel
+    }
+
+    private var has1080pLabel: Bool {
         let text = "\(fileName) \(caption)"
         if text.range(of: #"(?i)(?<![a-z0-9])(?:4k|2160p)(?![a-z0-9])"#, options: .regularExpression) != nil { return false }
+        // A reference to a copy in the comments does not label this file.
+        if text.range(of: #"(?i)(?:[评評][论論]|comments?)"#, options: .regularExpression) != nil { return false }
         return text.range(
             of: #"(?i)(?<!\d)1080\s*[pi]?(?!\d)"#, options: .regularExpression
         ) != nil
@@ -121,7 +133,17 @@ struct VideoItem: Identifiable, Hashable, Sendable {
 
     static func preferred1080p(in replies: [VideoItem], for original: VideoItem) -> VideoItem? {
         replies.filter { candidate in
-            guard candidate.id != original.id, candidate.is1080p else { return false }
+            guard candidate.id != original.id, candidate.fileID != original.fileID else { return false }
+            // Some comment copies retain 4K metadata despite an explicit 1080P
+            // label. Accept only a smaller file with matching episode and runtime;
+            // this does not change the original post's resolution classification.
+            let labeledCopy = candidate.has1080pLabel
+                && max(candidate.width, candidate.height) > 1920
+                && max(original.width, original.height) > 1920
+                && original.episode != nil && original.episode == candidate.episode
+                && original.duration > 0 && candidate.duration > 0
+                && original.size > 0 && candidate.size > 0 && candidate.size < original.size
+            guard candidate.is1080p || labeledCopy else { return false }
             if let lhs = original.episode, let rhs = candidate.episode, lhs != rhs { return false }
             if original.duration > 0, candidate.duration > 0 {
                 return abs(original.duration - candidate.duration) <= max(10, original.duration * 0.02)
@@ -129,6 +151,8 @@ struct VideoItem: Identifiable, Hashable, Sendable {
             // Documents may have no duration; require an explicit matching episode.
             return original.episode != nil && original.episode == candidate.episode
         }.sorted {
+            // Prefer dimensions that confirm 1080P over conflicting labels.
+            if $0.is1080p != $1.is1080p { return $0.is1080p }
             let lhsKnown = $0.width > 0 && $0.height > 0
             let rhsKnown = $1.width > 0 && $1.height > 0
             if lhsKnown != rhsKnown { return lhsKnown }
@@ -143,19 +167,30 @@ struct VideoPage: Sendable {
     var nextOffset: Int64?
 }
 
-/// Keep the channel post as the lookup anchor while paging through replies
-/// whose message IDs belong to a different chat.
+/// Keep the original for matching, but page using the resolved discussion's
+/// chat and root message so all cursor IDs belong to the same chat.
 struct VideoCommentLookup {
     let original: VideoItem
     private(set) var offset: Int64 = 0
     private(set) var canLoadMore = true
     private var pageCount = 0
     private var replies: [VideoItem] = []
+    private var threadChatID: Int64?
+    private var threadMessageID: Int64?
 
     init(original: VideoItem) { self.original = original }
 
-    var chatID: Int64 { original.chatID }
-    var messageID: Int64 { original.messageID }
+    var chatID: Int64 { threadChatID ?? original.chatID }
+    var messageID: Int64 { threadMessageID ?? original.messageID }
+
+    mutating func resolveThread(chatID: Int64, messageID: Int64) {
+        threadChatID = chatID
+        threadMessageID = messageID
+        offset = 0
+        canLoadMore = true
+        pageCount = 0
+        replies = []
+    }
 
     mutating func consume(_ page: VideoPage) -> VideoItem? {
         replies.append(contentsOf: page.items.filter { $0.fileID != original.fileID })

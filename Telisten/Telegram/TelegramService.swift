@@ -131,7 +131,13 @@ actor TelegramService {
     private var videoPlaybackChoices: [String: (date: Foundation.Date, choice: VideoPlaybackChoice)] = [:]
     private var refreshedFileIDs: [String: Int] = [:]
     private var authorizationState: AuthorizationState?
-    private var connectionState = "unknown"
+    private var connectionState = "unknown" {
+        didSet {
+            guard connectionState != oldValue else { return }
+            for observer in connectionStateObservers.values { observer.yield(connectionState) }
+        }
+    }
+    private var connectionStateObservers: [UUID: AsyncStream<String>.Continuation] = [:]
     private var loginTokenUpdateRevision: UInt64 = 0
     private var searchBotPeers: [String: MusicChat] = [:]
     private var lyricsAttachmentCache: [String: [TelegramLyricsAttachment]] = [:]
@@ -848,38 +854,74 @@ actor TelegramService {
         try Task.checkCancellation()
         guard accountID == lookupAccountID else { throw CancellationError() }
         guard let current else { throw ServiceError.incompleteDownload }
-        PlaybackDiagnostics.log("video_choice_original_complete request=\(requestID) is1080p=\(current.is1080p)")
+        PlaybackDiagnostics.log("video_choice_original_complete request=\(requestID) video=\(current.id) fileID=\(current.fileID) width=\(current.width) height=\(current.height) duration=\(current.duration) episode=\(current.episode ?? "none") is1080p=\(current.is1080p) hasComments=\(current.hasComments)")
         var choice = VideoPlaybackChoice(original: current, selected: current)
         guard prefer1080p, !current.is1080p else { return choice }
         do {
             var lookup = VideoCommentLookup(original: current)
+            PlaybackDiagnostics.log("video_comments_thread_start request=\(requestID) chat=\(current.chatID) message=\(current.messageID)")
+            // Resolve both identifiers together before paging: channel posts and
+            // their linked discussion roots have different message ID spaces.
+            let thread = try await VideoListRequest<MessageThreadInfo>.run(timeout: ContinuousClock.now.duration(to: deadline)) { completion in
+                try client.getMessageThread(chatId: current.chatID, messageId: current.messageID) { result in
+                    if case let .failure(error) = result, let error = error as? TDLibKit.Error {
+                        let message = error.code == 406 ? "suppressed" : String(error.message.prefix(512))
+                        PlaybackDiagnostics.log("video_comments_thread_error request=\(requestID) tdlibCode=\(error.code) tdlibMessage=\(message.debugDescription)")
+                    }
+                    completion(result)
+                }
+            }
+            try Task.checkCancellation()
+            guard accountID == lookupAccountID else { throw CancellationError() }
+            lookup.resolveThread(chatID: thread.chatId, messageID: thread.messageThreadId)
+            PlaybackDiagnostics.log("video_comments_thread_complete request=\(requestID) chat=\(lookup.chatID) message=\(lookup.messageID)")
+            var pageNumber = 0
             while lookup.canLoadMore {
                 try Task.checkCancellation()
                 guard ContinuousClock.now < deadline else { throw URLError(.timedOut) }
-                // This API accepts the original channel post and resolves its
-                // linked discussion itself. Do not substitute a discussion chat
-                // ID while retaining a message ID from the channel.
+                // The anchor and every cursor now belong to the discussion chat.
                 let chatID = lookup.chatID
                 let messageID = lookup.messageID
                 let offset = lookup.offset
-                PlaybackDiagnostics.log("video_comments_page_start request=\(requestID) offset=\(offset) connection=\(connectionState)")
+                pageNumber += 1
+                let pageStarted = Foundation.Date()
+                PlaybackDiagnostics.log("video_comments_page_start request=\(requestID) page=\(pageNumber) chat=\(chatID) message=\(messageID) offset=\(offset) limit=100 connection=\(connectionState) remaining=\(ContinuousClock.now.duration(to: deadline))")
                 let videos = try await VideoListRequest<VideoPage>.run(timeout: ContinuousClock.now.duration(to: deadline)) { completion in
                     try client.getMessageThreadHistory(
                         chatId: chatID, fromMessageId: offset, limit: 100,
                         messageId: messageID, offset: 0
                     ) { result in
+                        // NSError bridging drops TDLib's server code and message.
+                        // Keep the request cursor so a failing page is identifiable.
+                        if case let .failure(error) = result, let error = error as? TDLibKit.Error {
+                            let message = error.code == 406 ? "suppressed" : String(error.message.prefix(512))
+                            PlaybackDiagnostics.log("video_comments_page_error request=\(requestID) chat=\(chatID) message=\(messageID) offset=\(offset) tdlibCode=\(error.code) tdlibMessage=\(message.debugDescription) elapsed=\(Foundation.Date().timeIntervalSince(pageStarted))")
+                        }
                         completion(result.map { page in
-                            let messages = (page.messages ?? []).filter { offset == 0 || $0.id < offset }
+                            let rawMessages = page.messages ?? []
+                            let messages = rawMessages.filter { offset == 0 || $0.id < offset }
+                            // IDs from raw messages expose linked-chat responses and
+                            // cursor filtering without logging unrelated comment text.
+                            let ids = rawMessages.map { "\($0.chatId):\($0.id)" }.joined(separator: ",")
+                            PlaybackDiagnostics.log("video_comments_page_response request=\(requestID) offset=\(offset) rawCount=\(rawMessages.count) filteredCount=\(messages.count) messages=[\(ids)] elapsed=\(Foundation.Date().timeIntervalSince(pageStarted))")
                             return VideoPage(items: messages.compactMap(TelegramMapping.video(from:)), nextOffset: messages.map(\.id).min())
                         })
                     }
                 }
                 try Task.checkCancellation()
                 PlaybackDiagnostics.log("video_comments_page_complete request=\(requestID) videos=\(videos.items.count) nextOffset=\(videos.nextOffset ?? 0)")
+                for candidate in videos.items {
+                    // Ask the existing matcher rather than maintaining separate
+                    // diagnostic matching rules that could drift from playback.
+                    let matches = VideoItem.preferred1080p(in: [candidate], for: current) != nil
+                    PlaybackDiagnostics.log("video_comments_candidate request=\(requestID) page=\(pageNumber) video=\(candidate.id) fileID=\(candidate.fileID) sameFile=\(candidate.fileID == current.fileID) sameMessage=\(candidate.id == current.id) width=\(candidate.width) height=\(candidate.height) is1080p=\(candidate.is1080p) duration=\(candidate.duration) durationDelta=\(abs(candidate.duration - current.duration)) durationTolerance=\(max(10, current.duration * 0.02)) episode=\(candidate.episode ?? "none") originalEpisode=\(current.episode ?? "none") matches=\(matches) eligible=\(matches && candidate.fileID != current.fileID) size=\(candidate.size) fileName=\(String(candidate.fileName.prefix(160)).debugDescription) title=\(String(candidate.title.prefix(160)).debugDescription)")
+                }
                 if let selected = lookup.consume(videos) {
+                    PlaybackDiagnostics.log("video_comments_selected request=\(requestID) page=\(pageNumber) video=\(selected.id)")
                     choice.selected = selected
                     break
                 }
+                PlaybackDiagnostics.log("video_comments_continue request=\(requestID) page=\(pageNumber) canLoadMore=\(lookup.canLoadMore) nextOffset=\(lookup.offset)")
             }
             // Share the metadata lookup between the list and playback. Never
             // cache access errors, so clicking a row can retry a failed lookup.
@@ -1525,6 +1567,25 @@ actor TelegramService {
             throw ServiceError.sessionPersistenceFailed
         }
         return account
+    }
+
+    // Read TDLib's actual state without starting another connection or request.
+    func videoConnectionState() -> String { connectionState }
+
+    func connectionStateUpdates() -> AsyncStream<String> {
+        let id = UUID()
+        return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            connectionStateObservers[id] = continuation
+            // Subscribe and send the initial value on the same actor to avoid gaps.
+            continuation.yield(connectionState)
+            continuation.onTermination = { @Sendable [weak self] _ in
+                Task { await self?.removeConnectionStateObserver(id) }
+            }
+        }
+    }
+
+    private func removeConnectionStateObserver(_ id: UUID) {
+        connectionStateObservers.removeValue(forKey: id)
     }
 
     private func receiveUpdate(_ data: Data) {

@@ -111,6 +111,8 @@ final class AppModel: ObservableObject {
     private let artworkStore: ArtworkStore
     private let chatAvatarStore: ChatAvatarStore
     private let telegram: TelegramService
+    // Share the active account's existing connection with status indicators.
+    var telegramConnectionService: TelegramService { telegram }
     private let lyrics: LyricsService
     private let listenTogetherBroadcaster = ListenTogetherBroadcaster()
     private var downloadTasks: [String: Task<URL, Error>] = [:]

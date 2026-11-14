@@ -56,6 +56,12 @@ struct VideoLibraryView: View {
     @StateObject var library: VideoLibraryModel
     @ObservedObject var musicPlayer: AudioPlayer
     @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    private var filteredChats: [MusicChat] {
+        let keyword = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return keyword.isEmpty ? library.chats : library.chats.filter { $0.title.localizedStandardContains(keyword) }
+    }
 
     var body: some View {
         NavigationStack {
@@ -67,24 +73,38 @@ struct VideoLibraryView: View {
                     Text("All chats").tag(0)
                     ForEach(library.folders) { folder in Text(folder.title).tag(folder.id) }
                 }
-                .padding()
+                .pickerStyle(.menu)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+                .padding(.vertical, 4)
+                VideoConnectionStatusView(service: library.service)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
+                    .padding(.bottom, 4)
                 if library.isLoading { ProgressView().padding() }
                 if let error = library.errorMessage {
                     Text(error).foregroundStyle(.red).padding()
                     Button("Retry") { Task { await library.load() } }
                 }
-                List(library.chats) { chat in
+                List(filteredChats) { chat in
                     NavigationLink {
                         VideoChannelView(service: library.service, accountID: library.accountID, chat: chat, musicPlayer: musicPlayer)
                     } label: {
                         Label(chat.title, systemImage: chat.symbolName)
                     }
                 }
-                if !library.isLoading, library.errorMessage == nil, library.chats.isEmpty {
-                    Text("No chats in this folder.").foregroundStyle(.secondary).padding()
+                if !library.isLoading, library.errorMessage == nil, filteredChats.isEmpty {
+                    Text(library.chats.isEmpty ? "No chats in this folder." : "No matching channels.")
+                        .foregroundStyle(.secondary).padding()
                 }
             }
             .navigationTitle("Videos")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search channels")
+            #else
+            .searchable(text: $query, prompt: "Search channels")
+            #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
                 ToolbarItem(placement: .primaryAction) {
@@ -99,6 +119,41 @@ struct VideoLibraryView: View {
         .frame(minWidth: 700, minHeight: 560)
         .background { VideoLibraryWindowConfiguration() }
         #endif
+    }
+}
+
+struct VideoConnectionStatusView: View {
+    let service: TelegramService
+    @State private var state = "unknown"
+
+    private var message: LocalizedStringKey {
+        switch state {
+        case "connectionStateReady": return "Connected to Telegram"
+        case "connectionStateWaitingForNetwork": return "Waiting for network…"
+        case "connectionStateConnectingToProxy": return "Connecting to proxy…"
+        case "connectionStateUpdating": return "Updating Telegram…"
+        default: return "Connecting to Telegram…"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if state == "connectionStateReady" {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            } else {
+                ProgressView().controlSize(.small)
+            }
+            Text(message).font(.caption).foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+        .task {
+            // TDLib pushes changes; no timer or additional network probes are needed.
+            let updates = await service.connectionStateUpdates()
+            for await value in updates {
+                guard !Task.isCancelled else { return }
+                state = value
+            }
+        }
     }
 }
 
@@ -182,6 +237,9 @@ private struct VideoChannelView: View {
             }
         }
         .navigationTitle(chat.title)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) { VideoConnectionStatusView(service: service) }
+        }
         .searchable(text: $query)
         .task(id: query) {
             // Cancel old searches before replacing the channel's results.

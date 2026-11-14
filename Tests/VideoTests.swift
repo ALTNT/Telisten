@@ -89,9 +89,14 @@ enum VideoTests {
         precondition(correct.is1080p)
         precondition(item(3, width: 1080, height: 1920).is1080p)
         precondition(!item(3, width: 1280, height: 720).is1080p)
+        precondition(item(3, width: 1920, height: 804).is1080p)
+        precondition(item(3, width: 804, height: 1920).is1080p)
+        precondition(!item(3, width: 3840, height: 1080).is1080p)
+        precondition(!item(3, caption: "第103集 1080P", width: 3840, height: 1608).is1080p)
         precondition(item(3, caption: "第 103 集 1080p", width: 0, height: 0).is1080p)
         precondition(!item(3, caption: "第103集 21080p", width: 0, height: 0).is1080p)
         precondition(!item(3, caption: "#4K 第103集 评论区1080P", width: 0, height: 0).is1080p)
+        precondition(!item(3, caption: "第103集 评论区1080P", width: 0, height: 0).is1080p)
         var genericDocument = correct
         genericDocument.mimeType = "application/octet-stream"
         precondition(genericDocument.streamingMimeType == "video/mp4")
@@ -110,22 +115,53 @@ enum VideoTests {
         precondition(VideoItem.preferred1080p(in: [fakeLabel, correct], for: original)?.id == correct.id)
         precondition(VideoItem.preferred1080p(in: [], for: original) == nil)
 
-        // A channel's comment count may be absent. Always anchor reply queries
-        // at the original channel post, even as cursors use discussion IDs.
+        // Reproduce the reported cropped video and conflicting 4K metadata.
+        let wideOriginal = item(10, caption: "#斗破苍穹 #4K 第218集 评论区1080P", duration: 1362,
+                                width: 3840, height: 1608, size: 1_200_000_000)
+        let cropped = item(11, caption: "#斗破苍穹 第218集 1080P", duration: 1362,
+                           width: 1920, height: 804, size: 664_468_643)
+        var labeled = item(12, caption: "#斗破苍穹 第218集 1080P", duration: 1362,
+                           width: 3840, height: 1608, size: 700_000_000)
+        precondition(VideoItem.preferred1080p(in: [cropped], for: wideOriginal)?.id == cropped.id)
+        precondition(VideoItem.preferred1080p(in: [labeled], for: wideOriginal)?.id == labeled.id)
+        precondition(VideoItem.preferred1080p(in: [labeled, cropped], for: wideOriginal)?.id == cropped.id)
+        labeled.caption = "#斗破苍穹 第219集 1080P"
+        precondition(VideoItem.preferred1080p(in: [labeled], for: wideOriginal) == nil)
+        labeled.caption = "#斗破苍穹 第218集 1080P"
+        labeled.duration = 15
+        precondition(VideoItem.preferred1080p(in: [labeled], for: wideOriginal) == nil)
+        labeled.duration = 1362
+        labeled.size = wideOriginal.size
+        precondition(VideoItem.preferred1080p(in: [labeled], for: wideOriginal) == nil)
+        labeled.size = 700_000_000
+        labeled.caption = "#斗破苍穹 第218集 4K 评论区1080P"
+        precondition(VideoItem.preferred1080p(in: [labeled], for: wideOriginal) == nil)
+        labeled.caption = "#斗破苍穹 第218集 评论区1080P"
+        precondition(VideoItem.preferred1080p(in: [labeled], for: wideOriginal) == nil)
+        labeled.caption = "#斗破苍穹 第218集 1080P"
+        labeled.width = 1280
+        labeled.height = 720
+        precondition(VideoItem.preferred1080p(in: [labeled], for: wideOriginal) == nil)
+        log("PASS: cropped 1080P and smaller labeled copies, confirmed-resolution priority, conflicting episode/runtime/size and comment-reference rejection")
+
+        // The original remains the matching target even when no comment count
+        // exists. Both paging identifiers must come from the resolved thread.
         var uncounted = original
         uncounted.hasComments = false
         var lookup = VideoCommentLookup(original: uncounted)
         precondition(lookup.canLoadMore)
+        lookup.resolveThread(chatID: -200, messageID: 250)
+        precondition(lookup.original.id == uncounted.id && lookup.offset == 0)
         var forwardedRoot = correct
         forwardedRoot.fileID = original.fileID
         precondition(lookup.consume(VideoPage(items: [forwardedRoot], nextOffset: 500)) == nil)
-        precondition(lookup.chatID == original.chatID && lookup.messageID == original.messageID)
+        precondition(lookup.chatID == -200 && lookup.messageID == 250)
         precondition(lookup.offset == 500 && lookup.canLoadMore)
         precondition(lookup.consume(VideoPage(items: [], nextOffset: 400)) == nil)
         precondition(lookup.canLoadMore && lookup.offset == 400)
         let matchedReply = lookup.consume(VideoPage(items: [correct], nextOffset: 300))
         precondition(matchedReply?.chatID == correct.chatID && matchedReply?.size == 672_000_000)
-        precondition(lookup.chatID == original.chatID && lookup.messageID == original.messageID)
+        precondition(lookup.chatID == -200 && lookup.messageID == 250)
         var repeated = VideoCommentLookup(original: original)
         _ = repeated.consume(VideoPage(items: [], nextOffset: 500))
         _ = repeated.consume(VideoPage(items: [], nextOffset: 500))
@@ -133,7 +169,7 @@ enum VideoTests {
         var limited = VideoCommentLookup(original: original)
         for page in 0..<10 { _ = limited.consume(VideoPage(items: [], nextOffset: Int64(1000 - page))) }
         precondition(!limited.canLoadMore)
-        log("PASS: channel comment anchor, absent comment count, forwarded root exclusion, text-only pages, reply size and pagination bounds")
+        log("PASS: resolved discussion anchor across pages, absent comment count, forwarded root exclusion, text-only pages, reply size and pagination bounds")
 
         let window = VideoBufferWindow(offset: 3_000_000_001, fileSize: 4_000_000_000)
         precondition(window.length == 32 * 1_024 * 1_024)

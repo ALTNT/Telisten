@@ -342,6 +342,12 @@ struct LibraryView: View {
 
     private var sidebar: some View {
         List(selection: $model.selected) {
+            // Keep connection status inside the list so the navigation bar
+            // retains its own safe area and its controls remain accessible.
+            VideoConnectionStatusView(service: model.telegramConnectionService)
+                .padding(.vertical, 4)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             Section("Library") {
                 Label("Search all music", systemImage: "magnifyingglass.circle.fill")
                     .tag(SidebarSelection.globalSearch)
