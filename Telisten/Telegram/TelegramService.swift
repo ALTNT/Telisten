@@ -126,6 +126,9 @@ actor TelegramService {
     private var manager: TDLibClientManager?
     private var client: TDLibClient?
     private let fileDownloadGate = TDLibFileDownloadGate()
+    private var videoSessions: [UUID: Int] = [:]
+    private var videoDownloadWindows: [UUID: VideoBufferWindow] = [:]
+    private var videoPlaybackChoices: [String: (date: Foundation.Date, choice: VideoPlaybackChoice)] = [:]
     private var refreshedFileIDs: [String: Int] = [:]
     private var authorizationState: AuthorizationState?
     private var loginTokenUpdateRevision: UInt64 = 0
@@ -724,6 +727,221 @@ actor TelegramService {
         } catch {
             throw ServiceError.telegram("Could not invite contacts to Listen Together: \(error.localizedDescription)")
         }
+    }
+
+    func videoFolders() async throws -> [VideoFolder] {
+        let client = try await requireReadyClient()
+        let state = try await client.getCurrentState()
+        for update in state.updates {
+            if case let .updateChatFolders(value) = update {
+                return value.chatFolders.map { VideoFolder(id: $0.id, title: $0.name.text.text) }
+            }
+        }
+        return []
+    }
+
+    func videoChats(folderID: Int?) async throws -> [MusicChat] {
+        let client = try await requireReadyClient()
+        let list: ChatList? = folderID.map { .chatListFolder(ChatListFolder(chatFolderId: $0)) }
+        // Load the folder itself, including rule-based members and archived chats.
+        // Reading only includedChatIds would omit those members.
+        for _ in 0..<100 {
+            try Task.checkCancellation()
+            do { _ = try await client.loadChats(chatList: list, limit: 100) }
+            catch let error as TDLibKit.Error where error.code == 404 { break }
+        }
+        let result = try await client.getChats(chatList: list, limit: 10_000)
+        var chats: [MusicChat] = []
+        for id in result.chatIds {
+            try Task.checkCancellation()
+            let chat = try await client.getChat(chatId: id)
+            if let value = TelegramMapping.chat(from: chat) { chats.append(value) }
+        }
+        return chats
+    }
+
+    func videos(in chatID: Int64, offsetID: Int64 = 0, query: String = "") async throws -> VideoPage {
+        let client = try await requireReadyClient()
+        var items: [VideoItem] = []
+        var offsets: [Int64] = []
+        // Include videos sent as documents. Advance using raw message IDs even
+        // when a page contains only unrelated documents.
+        for filter in [SearchMessagesFilter.searchMessagesFilterVideo, .searchMessagesFilterDocument] {
+            let result = try await client.searchChatMessages(
+                chatId: chatID, filter: filter, fromMessageId: offsetID,
+                limit: 30, offset: 0, query: query, senderId: nil, topicId: nil
+            )
+            let messages = result.messages.filter { offsetID == 0 || $0.id < offsetID }
+            items.append(contentsOf: messages.compactMap(TelegramMapping.video(from:)))
+            if let last = messages.map(\.id).min() { offsets.append(last) }
+        }
+        // The newer boundary avoids skipping results from either filter.
+        let next = offsets.max()
+        var seen: Set<String> = []
+        let boundary = next ?? Int64.min
+        return VideoPage(
+            items: items.filter { $0.messageID >= boundary && seen.insert($0.id).inserted }
+                .sorted { $0.messageID > $1.messageID },
+            nextOffset: next
+        )
+    }
+
+    func videoPlaybackChoice(for original: VideoItem, prefer1080p: Bool) async throws -> VideoPlaybackChoice {
+        let client = try await requireReadyClient()
+        let lookupAccountID = accountID
+        if prefer1080p, let cached = videoPlaybackChoices[original.id],
+           Foundation.Date().timeIntervalSince(cached.date) < 60 {
+            return cached.choice
+        }
+        let message = try await client.getMessage(chatId: original.chatID, messageId: original.messageID)
+        try Task.checkCancellation()
+        guard accountID == lookupAccountID else { throw CancellationError() }
+        guard let current = TelegramMapping.video(from: message) else { throw ServiceError.incompleteDownload }
+        var choice = VideoPlaybackChoice(original: current, selected: current)
+        guard prefer1080p, !current.is1080p else { return choice }
+        do {
+            var lookup = VideoCommentLookup(original: current)
+            while lookup.canLoadMore {
+                try Task.checkCancellation()
+                // This API accepts the original channel post and resolves its
+                // linked discussion itself. Do not substitute a discussion chat
+                // ID while retaining a message ID from the channel.
+                let page = try await client.getMessageThreadHistory(
+                    chatId: lookup.chatID, fromMessageId: lookup.offset, limit: 100,
+                    messageId: lookup.messageID, offset: 0
+                )
+                try Task.checkCancellation()
+                let messages = (page.messages ?? []).filter { lookup.offset == 0 || $0.id < lookup.offset }
+                let videos = VideoPage(
+                    items: messages.compactMap(TelegramMapping.video(from:)),
+                    nextOffset: messages.map(\.id).min()
+                )
+                if let selected = lookup.consume(videos) {
+                    choice.selected = selected
+                    break
+                }
+            }
+            // Share the metadata lookup between the list and playback. Never
+            // cache access errors, so clicking a row can retry a failed lookup.
+            guard accountID == lookupAccountID else { throw CancellationError() }
+            videoPlaybackChoices[current.id] = (Foundation.Date(), choice)
+        } catch is CancellationError { throw CancellationError() }
+        catch { choice.commentsUnavailable = true }
+        return choice
+    }
+
+    func beginVideoPlayback(_ video: VideoItem, expectedAccountID: String) throws -> UUID {
+        guard accountID == expectedAccountID else { throw CancellationError() }
+        let token = UUID()
+        videoSessions[token] = video.fileID
+        let key = "video.bufferedFiles.\(accountID)"
+        var ids = Set(UserDefaults.standard.array(forKey: key) as? [Int] ?? [])
+        ids.insert(video.fileID)
+        UserDefaults.standard.set(Array(ids), forKey: key)
+        return token
+    }
+
+    func endVideoPlayback(_ token: UUID) async {
+        videoDownloadWindows.removeValue(forKey: token)
+        guard let fileID = videoSessions.removeValue(forKey: token),
+              !videoSessions.values.contains(fileID), let client else { return }
+        _ = try? await client.cancelDownloadFile(fileId: fileID, onlyIfPending: false)
+    }
+
+    func clearVideoBuffers() async throws {
+        let client = try await requireReadyClient()
+        let key = "video.bufferedFiles.\(accountID)"
+        let ids = UserDefaults.standard.array(forKey: key) as? [Int] ?? []
+        var failed: [Int] = []
+        for id in ids {
+            guard !videoSessions.values.contains(id) else { failed.append(id); continue }
+            do { _ = try await client.deleteFile(fileId: id) }
+            catch { failed.append(id) }
+        }
+        UserDefaults.standard.set(failed, forKey: key)
+        if !failed.isEmpty { throw ServiceError.telegram("Some video buffers could not be cleared. Try again after closing video playback.") }
+    }
+
+    func videoBytes(_ video: VideoItem, session: UUID, offset: Int64, length: Int32) async throws -> Data {
+        guard offset >= 0, length > 0, offset < video.size else { return Data() }
+        let client = try await requireReadyClient()
+        guard videoSessions[session] == video.fileID else { throw CancellationError() }
+        let count = min(Int64(length), video.size - offset)
+        await fileDownloadGate.acquire(fileID: video.fileID, priority: .playback)
+        do {
+            for attempt in 0..<3 {
+                try Task.checkCancellation()
+                guard videoSessions[session] == video.fileID else { throw CancellationError() }
+                do {
+                    var file = try await client.getFile(fileId: video.fileID)
+                    if let bytes = try await bufferedVideoBytes(file, offset: offset, length: count, client: client).data {
+                        await fileDownloadGate.release(fileID: video.fileID)
+                        return bytes
+                    }
+                    let window = videoDownloadWindows[session]
+                    if attempt > 0 || !file.local.isDownloadingActive || window?.contains(offset: offset, length: count) != true {
+                        let next = VideoBufferWindow(offset: offset, fileSize: video.size)
+                        PlaybackDiagnostics.log("video_window_start fileID=\(video.fileID) offset=\(next.offset) length=\(next.length) attempt=\(attempt)")
+                        // Keep a bounded continuous transfer running. Waiting for
+                        // synchronous:true here can hold the gate indefinitely.
+                        file = try await client.downloadFile(
+                            fileId: video.fileID, limit: next.length, offset: next.offset,
+                            priority: 32, synchronous: false
+                        )
+                        guard videoSessions[session] == video.fileID else { throw CancellationError() }
+                        videoDownloadWindows[session] = next
+                    }
+                    var progress = VideoDownloadProgress(now: ProcessInfo.processInfo.systemUptime)
+                    while true {
+                        try Task.checkCancellation()
+                        guard videoSessions[session] == video.fileID else { throw CancellationError() }
+                        let buffered = try await bufferedVideoBytes(file, offset: offset, length: count, client: client)
+                        if let data = buffered.data {
+                            PlaybackDiagnostics.log("video_range_complete fileID=\(video.fileID) offset=\(offset) length=\(count)")
+                            await fileDownloadGate.release(fileID: video.fileID)
+                            return data
+                        }
+                        if progress.timedOut(available: buffered.available, now: ProcessInfo.processInfo.systemUptime) {
+                            throw URLError(.timedOut)
+                        }
+                        try await Task.sleep(for: .milliseconds(50))
+                        file = try await client.getFile(fileId: video.fileID)
+                    }
+                } catch is CancellationError { throw CancellationError() }
+                catch {
+                    guard videoSessions[session] == video.fileID else { throw CancellationError() }
+                    PlaybackDiagnostics.log("video_range_retry fileID=\(video.fileID) offset=\(offset) attempt=\(attempt)", error: error)
+                    let timeout = (error as? URLError)?.code == .timedOut
+                    guard attempt < 2, timeout || isDownloadCancelled(error) || isIncompleteDownload(error) else { throw error }
+                    _ = try? await client.cancelDownloadFile(fileId: video.fileID, onlyIfPending: false)
+                    try await Task.sleep(for: .milliseconds(250))
+                }
+            }
+            throw ServiceError.incompleteDownload
+        } catch {
+            await fileDownloadGate.release(fileID: video.fileID)
+            if error is CancellationError { throw CancellationError() }
+            throw readableDownloadError(error)
+        }
+    }
+
+    private func bufferedVideoBytes(
+        _ file: File, offset: Int64, length: Int64, client: TDLibClient
+    ) async throws -> (data: Data?, available: Int64) {
+        // Sparse files can be large while the requested range is missing. Ask
+        // TDLib about this exact offset before reading previously cached seeks.
+        let available: Int64
+        if file.local.isDownloadingCompleted { available = max(0, file.size - offset) }
+        else {
+            available = try await client.getFileDownloadedPrefixSize(fileId: file.id, offset: offset).size
+        }
+        guard available >= length, !file.local.path.isEmpty else { return (nil, available) }
+        let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: file.local.path))
+        defer { try? handle.close() }
+        try handle.seek(toOffset: UInt64(offset))
+        let data = try handle.read(upToCount: Int(length)) ?? Data()
+        guard data.count == Int(length) else { throw ServiceError.incompleteDownload }
+        return (data, available)
     }
 
     func hasMusic(in chat: MusicChat) async throws -> Bool {
@@ -1663,6 +1881,9 @@ actor TelegramService {
     }
 
     private func closeClient() async {
+        videoSessions.removeAll()
+        videoDownloadWindows.removeAll()
+        videoPlaybackChoices.removeAll()
         guard let client else { return }
         self.client = nil
         _ = try? await client.close()
@@ -1677,6 +1898,8 @@ actor TelegramService {
 
     private func removeTDLibStorage(for id: String) {
         try? FileManager.default.removeItem(at: storageURL(for: id))
+        // Local file IDs can be reused after deleting the TDLib database.
+        UserDefaults.standard.removeObject(forKey: "video.bufferedFiles.\(id)")
     }
 
     private var authorizationDefaultsKey: String {

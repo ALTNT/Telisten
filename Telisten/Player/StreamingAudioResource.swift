@@ -190,6 +190,7 @@ final class StreamingAudioResource: NSObject, AVAssetResourceLoaderDelegate, @un
     private let fileSize: Int64
     private let contentType: String
     private let window: StreamWindow
+    private let videoProvider: AudioByteProvider?
     private let lock = NSLock()
     private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
 
@@ -198,6 +199,23 @@ final class StreamingAudioResource: NSObject, AVAssetResourceLoaderDelegate, @un
         let normalizedMimeType = mimeType.lowercased() == "audio/x-flac" ? "audio/flac" : mimeType
         contentType = UTType(mimeType: normalizedMimeType)?.identifier ?? UTType.audio.identifier
         window = StreamWindow(fileSize: fileSize, provider: provider)
+        videoProvider = normalizedMimeType.lowercased().hasPrefix("video/") ? provider : nil
+    }
+
+    func bytes(at offset: Int64, length: Int) async throws -> Data {
+        try Task.checkCancellation()
+        guard offset >= 0, offset < fileSize, length > 0 else { return Data() }
+        let count = Int(min(Int64(length), fileSize - offset, Int64(Int32.max)))
+        let data: Data
+        if let videoProvider {
+            // TDLib already preloads a finite video window. Waiting for the
+            // audio window's extra block delays ready frames and leaves detached
+            // prefetch work alive after AVPlayer cancels or seeks.
+            data = try await videoProvider(offset, Int32(count))
+            guard data.count == count else { throw URLError(.cannotDecodeContentData) }
+        } else { data = try await window.bytes(at: offset, length: count) }
+        try Task.checkCancellation()
+        return data
     }
 
     func resourceLoader(
@@ -218,8 +236,16 @@ final class StreamingAudioResource: NSObject, AVAssetResourceLoaderDelegate, @un
         let context = "url=\(loadingRequest.request.url?.absoluteString ?? "unknown") offset=\(request.requestedOffset) length=\(request.requestedLength) currentOffset=\(request.currentOffset) toEnd=\(request.requestsAllDataToEndOfResource) size=\(fileSize) type=\(contentType)"
         PlaybackDiagnostics.log("resource_request \(context)")
         let identifier = ObjectIdentifier(loadingRequest)
-        let task = Task { [weak self, weak loadingRequest] in
-            guard let self, let loadingRequest else { return }
+        // AVAssetResourceLoader requires us to retain asynchronous requests
+        // until finishLoading or cancellation; a weak request can disappear and
+        // leave AVPlayer waiting forever without another network read.
+        let task = Task { [weak self] in
+            guard let self else {
+                if !loadingRequest.isCancelled, !loadingRequest.isFinished {
+                    loadingRequest.finishLoading(with: URLError(.cancelled))
+                }
+                return
+            }
             do {
                 var offset = request.currentOffset > 0 ? request.currentOffset : request.requestedOffset
                 let available = max(0, fileSize - offset)
@@ -230,24 +256,32 @@ final class StreamingAudioResource: NSObject, AVAssetResourceLoaderDelegate, @un
                 while remaining > 0 {
                     try Task.checkCancellation()
                     let length = Int(min(remaining, Int64(Self.responseSize)))
-                    let bytes = try await window.bytes(at: offset, length: length)
+                    let bytes = try await self.bytes(at: offset, length: length)
+                    try Task.checkCancellation()
+                    guard !loadingRequest.isCancelled else { throw CancellationError() }
                     guard !bytes.isEmpty else { break }
                     request.respond(with: bytes)
                     offset += Int64(bytes.count)
                     remaining -= Int64(bytes.count)
                 }
                 PlaybackDiagnostics.log("resource_complete \(context) remaining=\(remaining)")
-                loadingRequest.finishLoading()
+                if !loadingRequest.isCancelled, !loadingRequest.isFinished { loadingRequest.finishLoading() }
             } catch is CancellationError {
                 PlaybackDiagnostics.log("resource_cancelled \(context)")
-                loadingRequest.finishLoading(with: URLError(.cancelled))
+                if !loadingRequest.isCancelled, !loadingRequest.isFinished {
+                    loadingRequest.finishLoading(with: URLError(.cancelled))
+                }
             } catch {
                 PlaybackDiagnostics.log("resource_failed \(context)", error: error)
-                loadingRequest.finishLoading(with: error)
+                if !loadingRequest.isCancelled, !loadingRequest.isFinished { loadingRequest.finishLoading(with: error) }
             }
             removeTask(identifier)
         }
         store(task, for: identifier)
+        // Completion/cancellation can race the task's registration.
+        if loadingRequest.isFinished || loadingRequest.isCancelled {
+            takeTask(for: identifier)?.cancel()
+        }
         return true
     }
 

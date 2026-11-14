@@ -129,6 +129,15 @@
 		F5FBAD1AD47AB85D7BA175E3 /* NowPlayingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D30E8365362E333D85AE36F6 /* NowPlayingView.swift */; };
 		F868AB7962ABFC6B829DE9C7 /* ListenTogetherContactPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E4160FD92BB8144074EC930 /* ListenTogetherContactPicker.swift */; };
 		FE3042380DD2359EC57DF008 /* ListenTogetherView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 970F5F7259822B09641BC4DA /* ListenTogetherView.swift */; };
+		9704A2624BA169E4D9D41328 /* VideoModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B214D9DE7975166D4F2CF90 /* VideoModels.swift */; };
+		2BDF94C4F1266E17698C7B17 /* VideoModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B214D9DE7975166D4F2CF90 /* VideoModels.swift */; };
+		ADFEC8430EFC2C5F37AAC1BD /* VideoModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B214D9DE7975166D4F2CF90 /* VideoModels.swift */; };
+		0577244EB573F4678A51E03B /* VideoPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 447E4CE910C554F945FBB68F /* VideoPlayer.swift */; };
+		BF17C90C86A19022B7205435 /* VideoPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 447E4CE910C554F945FBB68F /* VideoPlayer.swift */; };
+		3D541F95A1D18CEE28CAA354 /* VideoPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 447E4CE910C554F945FBB68F /* VideoPlayer.swift */; };
+		22BF53271216072E9218F281 /* VideoLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A13083BFC30BBFC91565DEF /* VideoLibraryView.swift */; };
+		F422DD7C0A76DB13F0F52BC7 /* VideoLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A13083BFC30BBFC91565DEF /* VideoLibraryView.swift */; };
+		F91825E71FE9EE4FF93066F7 /* VideoLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A13083BFC30BBFC91565DEF /* VideoLibraryView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -188,6 +197,9 @@
 		E7B07A69B310BD8ADB95C699 /* BotSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotSearchView.swift; sourceTree = "<group>"; };
 		EE9FEA5BDC3AA9F3698C9E3B /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		FA45AFCDAD9D81F449E8F27C /* Telisten.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Telisten.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		3B214D9DE7975166D4F2CF90 /* VideoModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoModels.swift; sourceTree = "<group>"; };
+		447E4CE910C554F945FBB68F /* VideoPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoPlayer.swift; sourceTree = "<group>"; };
+		1A13083BFC30BBFC91565DEF /* VideoLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoLibraryView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -250,6 +262,7 @@
 		7165085D5C89935F74AE3CB3 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				1A13083BFC30BBFC91565DEF /* VideoLibraryView.swift */,
 				E7B07A69B310BD8ADB95C699 /* BotSearchView.swift */,
 				3A296FC32DFAD74456756D1C /* Components.swift */,
 				086D88AABCD626A56489CB0F /* FloatingLyricsSettings.swift */,
@@ -291,6 +304,7 @@
 		7D7579E3BDFEC0239D9EEF56 /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				3B214D9DE7975166D4F2CF90 /* VideoModels.swift */,
 				A5E7173B5042D701CCD0BB3F /* AppConfiguration.swift */,
 				A065497ED165324D5CBEFDE8 /* Formatting.swift */,
 				734CBCDC5DCD36CA09043C62 /* Models.swift */,
@@ -323,6 +337,7 @@
 		A7D91B5D291604DB43925F66 /* Player */ = {
 			isa = PBXGroup;
 			children = (
+				447E4CE910C554F945FBB68F /* VideoPlayer.swift */,
 				0C5CF5DAB218AEAEA7D8B04E /* AudioPlayer.swift */,
 				86FA2BBE87DED0C981DCD8AF /* ListenTogetherBroadcaster.swift */,
 				9AA615A898392D5704AF86F1 /* StreamingAudioResource.swift */,
@@ -538,6 +553,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				22BF53271216072E9218F281 /* VideoLibraryView.swift in Sources */,
+				0577244EB573F4678A51E03B /* VideoPlayer.swift in Sources */,
+				9704A2624BA169E4D9D41328 /* VideoModels.swift in Sources */,
 				11D6C99EF564927EE6994BA7 /* AppConfiguration.swift in Sources */,
 				1D928C7D3107DE2643D21F28 /* AppModel.swift in Sources */,
 				EC7C995D876673211AAFC98A /* ArtworkStore.swift in Sources */,
@@ -577,6 +595,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F422DD7C0A76DB13F0F52BC7 /* VideoLibraryView.swift in Sources */,
+				BF17C90C86A19022B7205435 /* VideoPlayer.swift in Sources */,
+				2BDF94C4F1266E17698C7B17 /* VideoModels.swift in Sources */,
 				ADE42F8901B5B0E976C8F0AF /* AppConfiguration.swift in Sources */,
 				2A6710EAC743CA89E6430207 /* AppModel.swift in Sources */,
 				77DC65110CE5515DF76946A4 /* ArtworkStore.swift in Sources */,
@@ -616,6 +637,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F91825E71FE9EE4FF93066F7 /* VideoLibraryView.swift in Sources */,
+				3D541F95A1D18CEE28CAA354 /* VideoPlayer.swift in Sources */,
+				ADFEC8430EFC2C5F37AAC1BD /* VideoModels.swift in Sources */,
 				AEB7197EDAACF537A4A159B5 /* AppConfiguration.swift in Sources */,
 				9D4F8EB1019F966D53BCEE9A /* AppModel.swift in Sources */,
 				9E334BA29740BB2D5E157CB6 /* ArtworkStore.swift in Sources */,

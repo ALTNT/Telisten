@@ -62,6 +62,8 @@ private struct BatchPlaylistSelection: Identifiable {
 
 struct LibraryView: View {
     @ObservedObject var model: AppModel
+    @AppStorage("video.enabled") private var videoEnabled = false
+    @State private var showVideos = false
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     #if DEBUG
     @State private var showSettings = ProcessInfo.processInfo.arguments.contains("--demo-settings")
@@ -180,6 +182,27 @@ struct LibraryView: View {
             .sheet(isPresented: $model.showListenTogetherSheet) {
                 ListenTogetherView(model: model)
             }
+            .sheet(isPresented: $showVideos) {
+                VideoLibraryView(library: model.makeVideoLibrary(), musicPlayer: model.player)
+                    .id(model.activeAccountID)
+            }
+            .onChange(of: videoEnabled) { enabled in
+                if !enabled {
+                    showVideos = false
+                    #if os(macOS)
+                    VideoPlaybackWindow.shared.close()
+                    #endif
+                }
+            }
+            .onChange(of: model.activeAccountID) { _ in
+                showVideos = false
+                #if os(macOS)
+                VideoPlaybackWindow.shared.close()
+                #endif
+            }
+            #if os(macOS)
+            .onDisappear { VideoPlaybackWindow.shared.close() }
+            #endif
             .sheet(isPresented: $model.showBotSearch) {
                 BotSearchConversationView(model: model)
                     #if os(macOS)
@@ -326,6 +349,12 @@ struct LibraryView: View {
                     .tag(SidebarSelection.favorites)
                 Label("Downloads", systemImage: "arrow.down.circle.fill")
                     .tag(SidebarSelection.downloads)
+                if videoEnabled {
+                    Button { showVideos = true } label: {
+                        Label("Videos", systemImage: "play.rectangle.fill")
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             if !model.searchBots.isEmpty {
                 Section("Music Bots") {

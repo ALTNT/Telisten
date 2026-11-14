@@ -91,6 +91,48 @@ enum TelegramMapping {
         )
     }
 
+    static func video(from message: Message) -> VideoItem? {
+        let file: File
+        let fileName: String
+        let mimeType: String
+        let caption: String
+        let duration: TimeInterval
+        let width: Int
+        let height: Int
+        let thumbnail: Data?
+        switch message.content {
+        case let .messageVideo(value):
+            file = value.video.video
+            fileName = value.video.fileName
+            mimeType = value.video.mimeType.isEmpty ? "video/mp4" : value.video.mimeType
+            caption = value.caption.text
+            duration = TimeInterval(value.video.duration)
+            width = value.video.width
+            height = value.video.height
+            thumbnail = value.video.minithumbnail?.data
+        case let .messageDocument(value):
+            fileName = value.document.fileName
+            mimeType = value.document.mimeType
+            let suffix = (fileName as NSString).pathExtension.lowercased()
+            guard mimeType.lowercased().hasPrefix("video/") || ["mp4", "m4v", "mov", "mkv", "webm"].contains(suffix) else { return nil }
+            file = value.document.document
+            caption = value.caption.text
+            duration = 0
+            width = 0
+            height = 0
+            thumbnail = value.document.minithumbnail?.data
+        default:
+            return nil
+        }
+        return VideoItem(
+            chatID: message.chatId, messageID: message.id, fileID: file.id,
+            fileName: fileName, mimeType: mimeType, caption: caption,
+            duration: duration, size: file.size > 0 ? file.size : file.expectedSize,
+            width: width, height: height, thumbnail: thumbnail,
+            hasComments: (message.interactionInfo?.replyInfo?.replyCount ?? 0) > 0
+        )
+    }
+
     static func lyricsAttachment(from message: Message) -> TelegramLyricsAttachment? {
         guard case let .messageDocument(value) = message.content,
               value.document.fileName.lowercased().hasSuffix(".lrc") else { return nil }

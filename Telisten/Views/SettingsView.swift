@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @AppStorage("video.enabled") private var videoEnabled = false
+    @AppStorage("video.prefer1080p") private var prefer1080p = true
     @ObservedObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var lyricsServerDraft = ""
@@ -11,6 +13,7 @@ struct SettingsView: View {
     @State private var playlistFolderError: String?
     @State private var isRefreshingCache = true
     @State private var isConfirmingClearCache = false
+    @State private var isClearingVideoBuffers = false
 
     var body: some View {
         NavigationStack {
@@ -20,6 +23,24 @@ struct SettingsView: View {
                     Text("Telegram chats containing music appear below playlists when enabled.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+                Section("Videos") {
+                    Toggle("Enable video playback", isOn: $videoEnabled)
+                    if videoEnabled {
+                        Toggle("Prefer 1080P from comments", isOn: $prefer1080p)
+                        Text("Choose a Telegram folder in Videos. Matching 1080P replies are preferred; otherwise the original video is used.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Text("Videos buffer on demand in Telegram storage and do not use the music offline cache.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("Clear video buffers") {
+                            isClearingVideoBuffers = true
+                            Task {
+                                await model.clearVideoBuffers()
+                                isClearingVideoBuffers = false
+                            }
+                        }
+                        .disabled(isClearingVideoBuffers)
+                    }
                 }
                 Section("Offline cache") {
                     LabeledContent("Used", value: DisplayFormat.fileSize(model.cacheBytes))

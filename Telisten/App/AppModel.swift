@@ -3006,6 +3006,15 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func clearVideoBuffers() async {
+        do { try await telegram.clearVideoBuffers() }
+        catch { errorMessage = UserFacingError.message(for: error) }
+    }
+
+    func makeVideoLibrary() -> VideoLibraryModel {
+        VideoLibraryModel(service: telegram, accountID: activeAccountID ?? "legacy")
+    }
+
     private func beginMusicChatIndexing() {
         musicChatIndexTask?.cancel()
         musicChatIndexTask = Task { [weak self] in
