@@ -127,6 +127,8 @@ private struct VideoChannelView: View {
     @AppStorage("video.prefer1080p") private var prefer1080p = true
     @State private var choices: [String: VideoPlaybackChoice] = [:]
     @State private var failedLookups: Set<String> = []
+    @State private var checkingVideoIDs: Set<String> = []
+    @State private var commentLookupGeneration = UUID()
     @State private var items: [VideoItem] = []
     @State private var query = ""
     @State private var nextOffset: Int64?
@@ -181,18 +183,44 @@ private struct VideoChannelView: View {
             await load(reset: true)
         }
         .task(id: commentLookupKey) {
+            guard !Task.isCancelled else { return }
+            let requestID = UUID()
+            commentLookupGeneration = requestID
+            checkingVideoIDs = []
+            defer { if commentLookupGeneration == requestID { checkingVideoIDs = [] } }
             guard prefer1080p else { return }
-            // Resolve metadata in order, without downloading video files or
-            // starting concurrent requests for every visible row.
-            for video in items where !video.is1080p && choices[video.id] == nil && !failedLookups.contains(video.id) {
-                do {
-                    try Task.checkCancellation()
-                    let choice = try await service.videoPlaybackChoice(for: video, prefer1080p: true)
-                    try Task.checkCancellation()
-                    choices[video.id] = choice
-                    try await Task.sleep(for: .milliseconds(250))
-                } catch is CancellationError { return }
-                catch { failedLookups.insert(video.id) }
+            let pending = items.filter { !$0.is1080p && choices[$0.id] == nil && !failedLookups.contains($0.id) }
+            let service = service
+            // Keep four metadata lookups in flight. A slow post must not block
+            // every following episode, or start requests for the whole channel.
+            await withTaskGroup(of: (String, VideoPlaybackChoice?).self) { group in
+                var nextIndex = min(4, pending.count)
+                for video in pending.prefix(nextIndex) {
+                    checkingVideoIDs.insert(video.id)
+                    group.addTask {
+                        do { return (video.id, try await service.videoPlaybackChoice(for: video, prefer1080p: true)) }
+                        catch { return (video.id, nil) }
+                    }
+                }
+                while let (id, choice) = await group.next() {
+                    // A replaced search must not publish results into its successor.
+                    guard !Task.isCancelled, commentLookupGeneration == requestID else {
+                        group.cancelAll()
+                        return
+                    }
+                    checkingVideoIDs.remove(id)
+                    if let choice { choices[id] = choice }
+                    else { failedLookups.insert(id) }
+                    if nextIndex < pending.count {
+                        let video = pending[nextIndex]
+                        nextIndex += 1
+                        checkingVideoIDs.insert(video.id)
+                        group.addTask {
+                            do { return (video.id, try await service.videoPlaybackChoice(for: video, prefer1080p: true)) }
+                            catch { return (video.id, nil) }
+                        }
+                    }
+                }
             }
         }
         .refreshable { await load(reset: true) }
@@ -216,11 +244,13 @@ private struct VideoChannelView: View {
                     Text("Comments unavailable. Using channel original.").foregroundStyle(.secondary)
                 } else if choice != nil {
                     Text("No matching 1080P found. Using channel original.").foregroundStyle(.secondary)
-                } else {
+                } else if checkingVideoIDs.contains(video.id) {
                     HStack(spacing: 4) {
                         ProgressView().controlSize(.small)
                         Text("Checking comments for 1080P…").foregroundStyle(.secondary)
                     }
+                } else {
+                    Text("Waiting to check comments for 1080P…").foregroundStyle(.secondary)
                 }
             } else { Text("Channel original").foregroundStyle(.secondary) }
         }
@@ -254,6 +284,7 @@ private struct VideoChannelView: View {
         }
         isLoading = true
         errorMessage = nil
+        PlaybackDiagnostics.log("video_channel_load_start request=\(requestID) chat=\(chat.peerID) reset=\(reset)")
         do {
             let page = try await service.videos(in: chat.peerID, offsetID: reset ? 0 : nextOffset ?? 0, query: query)
             try Task.checkCancellation()
@@ -261,8 +292,14 @@ private struct VideoChannelView: View {
             var seen = Set(items.map(\.id))
             items.append(contentsOf: page.items.filter { seen.insert($0.id).inserted })
             nextOffset = page.nextOffset
-        } catch is CancellationError { }
-        catch { if generation == requestID { errorMessage = UserFacingError.message(for: error) } }
+            PlaybackDiagnostics.log("video_channel_load_complete request=\(requestID) count=\(items.count)")
+        } catch is CancellationError {
+            PlaybackDiagnostics.log("video_channel_load_cancelled request=\(requestID)")
+        }
+        catch {
+            PlaybackDiagnostics.log("video_channel_load_failed request=\(requestID)", error: error)
+            if generation == requestID { errorMessage = UserFacingError.message(for: error) }
+        }
         if generation == requestID { isLoading = false }
     }
 }
@@ -369,6 +406,9 @@ final class VideoPlaybackWindow: NSObject, NSWindowDelegate {
     static let shared = VideoPlaybackWindow()
     private var window: NSWindow?
     private var playback: VideoPlaybackModel?
+    private var keyMonitor: Any?
+    private var pendingSeek: TimeInterval?
+    private var seekGeneration = UUID()
 
     func open(service: TelegramService, original: VideoItem, accountID: String, musicPlayer: AudioPlayer) {
         // One independent player keeps music/video coordination and progress
@@ -395,9 +435,73 @@ final class VideoPlaybackWindow: NSObject, NSWindowDelegate {
         // A sheet would keep the player attached to the library. A regular
         // top-level window can move and resize independently of that sheet.
         window.makeKeyAndOrderFront(nil)
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            // AppKit delivers local event monitors on the main thread, before
+            // focused controls and application menu shortcuts handle the key.
+            // Return only a Sendable flag from assumeIsolated; NSEvent stays
+            // in the synchronous event monitor callback.
+            let handled = MainActor.assumeIsolated {
+                guard let self else { return false }
+                return self.handleKeyEvent(event) == nil
+            }
+            return handled ? nil : event
+        }
+    }
+
+    private func handleKeyEvent(_ event: NSEvent) -> NSEvent? {
+        guard let playback, let eventWindow = event.window else { return event }
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        guard modifiers.isEmpty, !(eventWindow.firstResponder is NSTextView) else { return event }
+        // AVKit may move its surface into a separate full-screen window. Only
+        // handle that window if it contains this specific player's surface.
+        guard eventWindow === window || containsPlayer(in: eventWindow.contentView, player: playback.player) else { return event }
+        switch event.keyCode {
+        case 123: seek(by: -10, player: playback.player)
+        case 124: seek(by: 10, player: playback.player)
+        case 49:
+            if !event.isARepeat {
+                if playback.player.timeControlStatus == .paused { playback.player.play() }
+                else { playback.pause() }
+            }
+        default: return event
+        }
+        return nil
+    }
+
+    private func containsPlayer(in view: NSView?, player: AVPlayer) -> Bool {
+        guard let view else { return false }
+        if let surface = view as? AVPlayerView, surface.player === player { return true }
+        return view.subviews.contains { containsPlayer(in: $0, player: player) }
+    }
+
+    private func seek(by seconds: TimeInterval, player: AVPlayer) {
+        guard let item = player.currentItem, item.status == .readyToPlay else { return }
+        let current = pendingSeek ?? player.currentTime().seconds
+        let duration = item.duration.seconds
+        guard current.isFinite, duration.isFinite, duration > 0 else { return }
+        let target = min(duration, max(0, current + seconds))
+        pendingSeek = target
+        let generation = UUID()
+        seekGeneration = generation
+        // Do not pause/play around a seek: AVPlayer preserves the current rate.
+        // Accumulate rapid arrow presses while an earlier seek is still pending.
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 600)) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.seekGeneration == generation else { return }
+                self.pendingSeek = nil
+            }
+        }
+    }
+
+    private func removeKeyMonitor() {
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        keyMonitor = nil
+        pendingSeek = nil
+        seekGeneration = UUID()
     }
 
     func close() {
+        removeKeyMonitor()
         let closingWindow = window
         playback?.stop()
         playback = nil
@@ -410,6 +514,7 @@ final class VideoPlaybackWindow: NSObject, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         guard let closingWindow = notification.object as? NSWindow, closingWindow === window else { return }
         // The red close button must save progress and cancel byte requests too.
+        removeKeyMonitor()
         playback?.stop()
         playback = nil
         window = nil

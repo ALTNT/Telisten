@@ -43,6 +43,33 @@ enum PlaybackDiagnostics {
         }
     }
 
+    static func exportLogs() async throws -> URL {
+        // Snapshot on the writer queue so pending events are included and a
+        // concurrent rotation cannot split the exported files.
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async {
+                do {
+                    let library = try FileManager.default.url(for: .libraryDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
+                    let directory = library.appendingPathComponent("Logs/Telisten", isDirectory: true)
+                    let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+                    let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+                    var report = "Telisten diagnostics\nApp: \(version) (\(build))\nSystem: \(ProcessInfo.processInfo.operatingSystemVersionString)\nExported: \(ISO8601DateFormatter().string(from: .now))\n"
+                    var foundLogs = false
+                    for name in ["playback.previous.log", "playback.log"] {
+                        let source = directory.appendingPathComponent(name)
+                        guard FileManager.default.fileExists(atPath: source.path) else { continue }
+                        report += "\n--- \(name) ---\n" + (try String(contentsOf: source, encoding: .utf8))
+                        foundLogs = true
+                    }
+                    if !foundLogs { report += "\nNo diagnostic events have been recorded.\n" }
+                    let url = FileManager.default.temporaryDirectory.appendingPathComponent("Telisten-diagnostics-\(UUID().uuidString).txt")
+                    try report.write(to: url, atomically: true, encoding: .utf8)
+                    continuation.resume(returning: url)
+                } catch { continuation.resume(throwing: error) }
+            }
+        }
+    }
+
     private static func describe(_ error: Error, depth: Int = 0) -> String {
         let value = error as NSError
         var result = "domain=\(value.domain) code=\(value.code) description=\(value.localizedDescription)"

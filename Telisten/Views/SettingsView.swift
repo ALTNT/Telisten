@@ -14,6 +14,12 @@ struct SettingsView: View {
     @State private var isRefreshingCache = true
     @State private var isConfirmingClearCache = false
     @State private var isClearingVideoBuffers = false
+    #if os(iOS)
+    @State private var isExportingLogs = false
+    @State private var isSharingLogs = false
+    @State private var exportedLogsURL: URL?
+    @State private var logExportError: String?
+    #endif
 
     var body: some View {
         NavigationStack {
@@ -42,6 +48,28 @@ struct SettingsView: View {
                         .disabled(isClearingVideoBuffers)
                     }
                 }
+                #if os(iOS)
+                Section("Diagnostics") {
+                    Button {
+                        isExportingLogs = true
+                        logExportError = nil
+                        Task {
+                            defer { isExportingLogs = false }
+                            do {
+                                exportedLogsURL = try await PlaybackDiagnostics.exportLogs()
+                                isSharingLogs = true
+                            } catch { logExportError = UserFacingError.message(for: error) }
+                        }
+                    } label: {
+                        Label("Export logs", systemImage: "square.and.arrow.up")
+                    }
+                    .disabled(isExportingLogs)
+                    if isExportingLogs { ProgressView() }
+                    if let logExportError {
+                        Text(logExportError).font(.caption).foregroundStyle(.red)
+                    }
+                }
+                #endif
                 Section("Offline cache") {
                     LabeledContent("Used", value: DisplayFormat.fileSize(model.cacheBytes))
                     Picker("Maximum", selection: cacheLimit) {
@@ -199,6 +227,15 @@ struct SettingsView: View {
         .sheet(item: $editingSearchBot) { config in
             SearchBotEditorView(model: model, config: config)
         }
+        #if os(iOS)
+        .sheet(isPresented: $isSharingLogs, onDismiss: {
+            // Keep the snapshot available until the share sheet is dismissed.
+            if let exportedLogsURL { try? FileManager.default.removeItem(at: exportedLogsURL) }
+            exportedLogsURL = nil
+        }) {
+            if let exportedLogsURL { DiagnosticLogShareView(url: exportedLogsURL) }
+        }
+        #endif
     }
 
     private var cacheLimit: Binding<Int64> {
@@ -315,6 +352,18 @@ struct SettingsView: View {
         }
     }
 }
+
+#if os(iOS)
+private struct DiagnosticLogShareView: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+#endif
 
 private struct SearchBotEditorView: View {
     @ObservedObject var model: AppModel

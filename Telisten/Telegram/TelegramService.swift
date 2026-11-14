@@ -131,6 +131,7 @@ actor TelegramService {
     private var videoPlaybackChoices: [String: (date: Foundation.Date, choice: VideoPlaybackChoice)] = [:]
     private var refreshedFileIDs: [String: Int] = [:]
     private var authorizationState: AuthorizationState?
+    private var connectionState = "unknown"
     private var loginTokenUpdateRevision: UInt64 = 0
     private var searchBotPeers: [String: MusicChat] = [:]
     private var lyricsAttachmentCache: [String: [TelegramLyricsAttachment]] = [:]
@@ -761,61 +762,120 @@ actor TelegramService {
     }
 
     func videos(in chatID: Int64, offsetID: Int64 = 0, query: String = "") async throws -> VideoPage {
-        let client = try await requireReadyClient()
-        var items: [VideoItem] = []
-        var offsets: [Int64] = []
-        // Include videos sent as documents. Advance using raw message IDs even
-        // when a page contains only unrelated documents.
-        for filter in [SearchMessagesFilter.searchMessagesFilterVideo, .searchMessagesFilterDocument] {
-            let result = try await client.searchChatMessages(
-                chatId: chatID, filter: filter, fromMessageId: offsetID,
-                limit: 30, offset: 0, query: query, senderId: nil, topicId: nil
+        let requestID = UUID()
+        let started = Foundation.Date()
+        // Record stages without logging search text or message contents.
+        PlaybackDiagnostics.log("video_list_start request=\(requestID) chat=\(chatID) offset=\(offsetID) queryLength=\(query.count)")
+        defer { PlaybackDiagnostics.log("video_list_end request=\(requestID) elapsed=\(Foundation.Date().timeIntervalSince(started))") }
+        do {
+            try Task.checkCancellation()
+            let client = try await requireReadyClient()
+            try Task.checkCancellation()
+            PlaybackDiagnostics.log("video_list_client_ready request=\(requestID) client=\(client.id) connection=\(connectionState)")
+            var items: [VideoItem] = []
+            var offsets: [Int64] = []
+            // Include videos sent as documents. Advance using raw message IDs even
+            // when a page contains only unrelated documents.
+            for filter in [SearchMessagesFilter.searchMessagesFilterVideo, .searchMessagesFilterDocument] {
+                try Task.checkCancellation()
+                let filterName = filter == .searchMessagesFilterVideo ? "video" : "document"
+                let searchStarted = Foundation.Date()
+                PlaybackDiagnostics.log("video_list_search_start request=\(requestID) filter=\(filterName) connection=\(connectionState) timeout=30")
+                // Do not race TDLib's async wrapper in a task group: its
+                // continuation ignores cancellation, so the group could hang.
+                let page = try await VideoListRequest<VideoPage>.run { completion in
+                    try client.searchChatMessages(
+                        chatId: chatID, filter: filter, fromMessageId: offsetID,
+                        limit: 30, offset: 0, query: query, senderId: nil, topicId: nil
+                    ) { result in
+                        completion(result.map { result in
+                            let messages = result.messages.filter { offsetID == 0 || $0.id < offsetID }
+                            return VideoPage(items: messages.compactMap(TelegramMapping.video(from:)), nextOffset: messages.map(\.id).min())
+                        })
+                        PlaybackDiagnostics.log("video_list_search_callback request=\(requestID) filter=\(filterName) elapsed=\(Foundation.Date().timeIntervalSince(searchStarted))")
+                    }
+                }
+                try Task.checkCancellation()
+                PlaybackDiagnostics.log("video_list_search_complete request=\(requestID) filter=\(filterName) count=\(page.items.count) elapsed=\(Foundation.Date().timeIntervalSince(searchStarted))")
+                items.append(contentsOf: page.items)
+                if let last = page.nextOffset { offsets.append(last) }
+            }
+            // The newer boundary avoids skipping results from either filter.
+            let next = offsets.max()
+            var seen: Set<String> = []
+            let boundary = next ?? Int64.min
+            let page = VideoPage(
+                items: items.filter { $0.messageID >= boundary && seen.insert($0.id).inserted }
+                    .sorted { $0.messageID > $1.messageID },
+                nextOffset: next
             )
-            let messages = result.messages.filter { offsetID == 0 || $0.id < offsetID }
-            items.append(contentsOf: messages.compactMap(TelegramMapping.video(from:)))
-            if let last = messages.map(\.id).min() { offsets.append(last) }
+            PlaybackDiagnostics.log("video_list_complete request=\(requestID) count=\(page.items.count) nextOffset=\(next ?? 0)")
+            return page
+        } catch {
+            PlaybackDiagnostics.log("video_list_failed request=\(requestID) connection=\(connectionState)", error: error)
+            throw error
         }
-        // The newer boundary avoids skipping results from either filter.
-        let next = offsets.max()
-        var seen: Set<String> = []
-        let boundary = next ?? Int64.min
-        return VideoPage(
-            items: items.filter { $0.messageID >= boundary && seen.insert($0.id).inserted }
-                .sorted { $0.messageID > $1.messageID },
-            nextOffset: next
-        )
     }
 
     func videoPlaybackChoice(for original: VideoItem, prefer1080p: Bool) async throws -> VideoPlaybackChoice {
+        let requestID = UUID()
+        let started = Foundation.Date()
+        // Bound the whole lookup, including all comment pages, rather than
+        // allowing each of up to ten pages another full timeout interval.
+        let deadline = ContinuousClock.now.advanced(by: .seconds(30))
+        PlaybackDiagnostics.log("video_choice_start request=\(requestID) video=\(original.id) prefer1080p=\(prefer1080p) connection=\(connectionState)")
+        defer { PlaybackDiagnostics.log("video_choice_end request=\(requestID) elapsed=\(Foundation.Date().timeIntervalSince(started))") }
+        try Task.checkCancellation()
         let client = try await requireReadyClient()
         let lookupAccountID = accountID
         if prefer1080p, let cached = videoPlaybackChoices[original.id],
            Foundation.Date().timeIntervalSince(cached.date) < 60 {
+            PlaybackDiagnostics.log("video_choice_cache_hit request=\(requestID) selected=\(cached.choice.selected.id)")
             return cached.choice
         }
-        let message = try await client.getMessage(chatId: original.chatID, messageId: original.messageID)
+        PlaybackDiagnostics.log("video_choice_original_start request=\(requestID)")
+        let current: VideoItem?
+        do {
+            current = try await VideoListRequest<VideoItem?>.run(timeout: ContinuousClock.now.duration(to: deadline)) { completion in
+                try client.getMessage(chatId: original.chatID, messageId: original.messageID) { result in
+                    completion(result.map { TelegramMapping.video(from: $0) })
+                }
+            }
+        } catch {
+            PlaybackDiagnostics.log("video_choice_original_failed request=\(requestID) connection=\(connectionState)", error: error)
+            throw error
+        }
         try Task.checkCancellation()
         guard accountID == lookupAccountID else { throw CancellationError() }
-        guard let current = TelegramMapping.video(from: message) else { throw ServiceError.incompleteDownload }
+        guard let current else { throw ServiceError.incompleteDownload }
+        PlaybackDiagnostics.log("video_choice_original_complete request=\(requestID) is1080p=\(current.is1080p)")
         var choice = VideoPlaybackChoice(original: current, selected: current)
         guard prefer1080p, !current.is1080p else { return choice }
         do {
             var lookup = VideoCommentLookup(original: current)
             while lookup.canLoadMore {
                 try Task.checkCancellation()
+                guard ContinuousClock.now < deadline else { throw URLError(.timedOut) }
                 // This API accepts the original channel post and resolves its
                 // linked discussion itself. Do not substitute a discussion chat
                 // ID while retaining a message ID from the channel.
-                let page = try await client.getMessageThreadHistory(
-                    chatId: lookup.chatID, fromMessageId: lookup.offset, limit: 100,
-                    messageId: lookup.messageID, offset: 0
-                )
+                let chatID = lookup.chatID
+                let messageID = lookup.messageID
+                let offset = lookup.offset
+                PlaybackDiagnostics.log("video_comments_page_start request=\(requestID) offset=\(offset) connection=\(connectionState)")
+                let videos = try await VideoListRequest<VideoPage>.run(timeout: ContinuousClock.now.duration(to: deadline)) { completion in
+                    try client.getMessageThreadHistory(
+                        chatId: chatID, fromMessageId: offset, limit: 100,
+                        messageId: messageID, offset: 0
+                    ) { result in
+                        completion(result.map { page in
+                            let messages = (page.messages ?? []).filter { offset == 0 || $0.id < offset }
+                            return VideoPage(items: messages.compactMap(TelegramMapping.video(from:)), nextOffset: messages.map(\.id).min())
+                        })
+                    }
+                }
                 try Task.checkCancellation()
-                let messages = (page.messages ?? []).filter { lookup.offset == 0 || $0.id < lookup.offset }
-                let videos = VideoPage(
-                    items: messages.compactMap(TelegramMapping.video(from:)),
-                    nextOffset: messages.map(\.id).min()
-                )
+                PlaybackDiagnostics.log("video_comments_page_complete request=\(requestID) videos=\(videos.items.count) nextOffset=\(videos.nextOffset ?? 0)")
                 if let selected = lookup.consume(videos) {
                     choice.selected = selected
                     break
@@ -825,8 +885,15 @@ actor TelegramService {
             // cache access errors, so clicking a row can retry a failed lookup.
             guard accountID == lookupAccountID else { throw CancellationError() }
             videoPlaybackChoices[current.id] = (Foundation.Date(), choice)
-        } catch is CancellationError { throw CancellationError() }
-        catch { choice.commentsUnavailable = true }
+        } catch is CancellationError {
+            PlaybackDiagnostics.log("video_comments_cancelled request=\(requestID)")
+            throw CancellationError()
+        }
+        catch {
+            PlaybackDiagnostics.log("video_comments_fallback request=\(requestID) connection=\(connectionState)", error: error)
+            choice.commentsUnavailable = true
+        }
+        PlaybackDiagnostics.log("video_choice_complete request=\(requestID) selected=\(choice.selected.id) commentsUnavailable=\(choice.commentsUnavailable)")
         return choice
     }
 
@@ -1462,6 +1529,11 @@ actor TelegramService {
 
     private func receiveUpdate(_ data: Data) {
         guard let client, let update = try? client.decoder.decode(Update.self, from: data) else { return }
+        if case let .updateConnectionState(value) = update {
+            connectionState = String(describing: value.state)
+            PlaybackDiagnostics.log("telegram_connection_state client=\(client.id) state=\(connectionState)")
+            return
+        }
         guard case let .updateAuthorizationState(value) = update else { return }
         authorizationState = value.authorizationState
         switch value.authorizationState {
@@ -1881,6 +1953,7 @@ actor TelegramService {
     }
 
     private func closeClient() async {
+        connectionState = "unknown"
         videoSessions.removeAll()
         videoDownloadWindows.removeAll()
         videoPlaybackChoices.removeAll()

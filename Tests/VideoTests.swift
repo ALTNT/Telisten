@@ -21,6 +21,68 @@ enum VideoTests {
     static func log(_ value: String) { FileHandle.standardOutput.write(Data((value + "\n").utf8)) }
 
     static func main() async throws {
+        let logMarker = "diagnostic_export_test_\(UUID().uuidString)"
+        PlaybackDiagnostics.log(logMarker)
+        let exportedLogs = try await PlaybackDiagnostics.exportLogs()
+        defer { try? FileManager.default.removeItem(at: exportedLogs) }
+        let report = try String(contentsOf: exportedLogs, encoding: .utf8)
+        // Export must flush events already queued by the caller.
+        precondition(report.contains(logMarker))
+        precondition(report.contains("Telisten diagnostics\nApp:") && report.contains("\nSystem:"))
+        precondition(report.contains("--- playback.log ---"))
+        let secondExport = try await PlaybackDiagnostics.exportLogs()
+        defer { try? FileManager.default.removeItem(at: secondExport) }
+        precondition(secondExport != exportedLogs, "Share snapshots must not overwrite one another")
+        log("PASS: diagnostic snapshot includes queued events, version header and unique export files")
+
+        let immediate = try await VideoListRequest<Int>.run { completion in
+            completion(.success(42))
+            completion(.success(99))
+        }
+        precondition(immediate == 42, "Only the first callback may resume a request")
+        let timeoutStarted = Date()
+        do {
+            _ = try await VideoListRequest<Int>.run(timeout: .milliseconds(20)) { _ in }
+            preconditionFailure("A missing TDLib callback must time out")
+        } catch let error as URLError { precondition(error.code == .timedOut) }
+        precondition(Date().timeIntervalSince(timeoutStarted) < 1)
+        do {
+            _ = try await VideoListRequest<Int>.run(timeout: .milliseconds(20)) { completion in
+                DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(100)) {
+                    completion(.success(1))
+                }
+            }
+            preconditionFailure("Late result must not bypass timeout")
+        } catch let error as URLError { precondition(error.code == .timedOut) }
+        // Let the late callback run: a second continuation resume would crash.
+        try await Task.sleep(for: .milliseconds(150))
+        let requestProbe = VideoReadProbe()
+        let pendingRequest = Task {
+            try await VideoListRequest<Int>.run { _ in
+                Task { await requestProbe.begin() }
+            }
+        }
+        while !(await requestProbe.started) { try await Task.sleep(for: .milliseconds(5)) }
+        let cancellationStarted = Date()
+        pendingRequest.cancel()
+        do { _ = try await pendingRequest.value; preconditionFailure("Cancelled request returned a value") }
+        catch is CancellationError { }
+        precondition(Date().timeIntervalSince(cancellationStarted) < 1)
+        let cancelledBeforeStart = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await VideoListRequest<Int>.run { _ in
+                preconditionFailure("An already cancelled request must not send a query")
+            }
+        }
+        do { _ = try await cancelledBeforeStart.value; preconditionFailure("Cancelled request returned a value") }
+        catch is CancellationError { }
+        let failedRequest = URLError(.notConnectedToInternet)
+        do {
+            _ = try await VideoListRequest<Int>.run { $0(.failure(failedRequest)) }
+            preconditionFailure("TDLib error must reach the caller")
+        } catch let error as URLError { precondition(error.code == .notConnectedToInternet) }
+        log("PASS: callback success/error, missing callback timeout, late/duplicate callbacks and immediate cancellation")
+
         let original = item(1, caption: "#沧元图 #4K 第103集 评论区1080P", width: 3840, height: 2160)
         let correct = item(2)
         precondition(!original.is1080p, "A 4K caption mentioning 1080P must not count as 1080P")

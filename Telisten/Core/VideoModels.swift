@@ -1,5 +1,63 @@
 import Foundation
 
+/// TDLib callbacks may outlive the view. Resume the caller once, even when
+/// timeout, cancellation and a late server response arrive concurrently.
+final class VideoListRequest<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: Result<Value, Error>?
+    private var continuation: CheckedContinuation<Value, Error>?
+    private var timer: Task<Void, Never>?
+
+    static func run(
+        timeout: Duration = .seconds(30),
+        start: @Sendable (@escaping @Sendable (Result<Value, Error>) -> Void) throws -> Void
+    ) async throws -> Value {
+        let request = VideoListRequest()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                request.begin(continuation, timeout: timeout)
+                guard !Task.isCancelled else {
+                    request.finish(.failure(CancellationError()))
+                    return
+                }
+                do { try start { request.finish($0) } }
+                catch { request.finish(.failure(error)) }
+            }
+        } onCancel: {
+            request.finish(.failure(CancellationError()))
+        }
+    }
+
+    private func begin(_ continuation: CheckedContinuation<Value, Error>, timeout: Duration) {
+        lock.lock()
+        if let result {
+            lock.unlock()
+            continuation.resume(with: result)
+            return
+        }
+        self.continuation = continuation
+        timer = Task { [weak self] in
+            do { try await Task.sleep(for: timeout) }
+            catch { return }
+            self?.finish(.failure(URLError(.timedOut)))
+        }
+        lock.unlock()
+    }
+
+    private func finish(_ result: Result<Value, Error>) {
+        lock.lock()
+        guard self.result == nil else { lock.unlock(); return }
+        self.result = result
+        let continuation = self.continuation
+        let timer = self.timer
+        self.continuation = nil
+        self.timer = nil
+        lock.unlock()
+        timer?.cancel()
+        continuation?.resume(with: result)
+    }
+}
+
 struct VideoFolder: Identifiable, Hashable, Sendable {
     var id: Int
     var title: String
