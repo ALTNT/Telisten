@@ -696,6 +696,17 @@ final class AppModel: ObservableObject {
     }
 
     func search() async {
+        if selected == .favorites || selected == .downloads {
+            let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let values = selected == .favorites
+                ? favorites.compactMap { knownTracks[$0] }.sorted { $0.date > $1.date }
+                : downloadedTracks(from: cachedIDs)
+            tracks = values.filter { matchesSearch($0, query: query) }
+            hasMoreTracks = false
+            loadMoreError = nil
+            errorMessage = nil
+            return
+        }
         if isGlobalSearch {
             let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !query.isEmpty else {

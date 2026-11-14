@@ -557,7 +557,12 @@ struct LibraryView: View {
         )
         #endif
         .onSubmit(of: .search) { Task { await model.search() } }
-        .onChange(of: model.searchText) { _ in finishSelectingTracks() }
+        .onChange(of: model.searchText) { query in
+            finishSelectingTracks()
+            if query.isEmpty && (model.selected == .favorites || model.selected == .downloads) {
+                Task { await model.search() }
+            }
+        }
         .onChange(of: model.tracks.map(\.id)) { ids in
             selectedTrackIDs.formIntersection(ids)
         }
