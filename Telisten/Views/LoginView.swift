@@ -7,6 +7,7 @@ import AppKit
 
 struct LoginView: View {
     @ObservedObject var model: AppModel
+    @State private var isShowingProxySettings = false
     @State private var phone = ""
     @State private var code = ""
     @State private var password = ""
@@ -28,6 +29,8 @@ struct LoginView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     brand
                     hero
+                    Button("Telegram proxy", systemImage: "network") { isShowingProxySettings = true }
+                        .padding(.bottom, 20)
                     if model.hasCredentials {
                         authorizationFlow
                     } else {
@@ -45,6 +48,9 @@ struct LoginView: View {
             #endif
         }
         .background(Color.telistenBackground)
+        .sheet(isPresented: $isShowingProxySettings) {
+            TelegramProxySettingsView(controller: model.proxyController)
+        }
     }
 
     private var brand: some View {

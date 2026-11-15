@@ -2,6 +2,15 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Telisten reads your Wi-Fi name to choose the Telegram proxy you configured. Your location is not recorded.</string>
+    <key>NSLocationTemporaryUsageDescriptionDictionary</key>
+    <dict>
+        <key>WiFiProxy</key>
+        <string>Precise location permission lets Telisten read the Wi-Fi name for automatic proxy switching.</string>
+    </dict>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Telisten connects to the SOCKS5 proxy you configured on your local network.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleExecutable</key>

@@ -138,6 +138,15 @@
 		22BF53271216072E9218F281 /* VideoLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A13083BFC30BBFC91565DEF /* VideoLibraryView.swift */; };
 		F422DD7C0A76DB13F0F52BC7 /* VideoLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A13083BFC30BBFC91565DEF /* VideoLibraryView.swift */; };
 		F91825E71FE9EE4FF93066F7 /* VideoLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A13083BFC30BBFC91565DEF /* VideoLibraryView.swift */; };
+		54F6559288D44AFBBF056045 /* TelegramProxyConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF592DBE118E4B69B72E4893 /* TelegramProxyConfiguration.swift */; };
+		05375B959D6C4130AF2D97C6 /* TelegramProxyConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF592DBE118E4B69B72E4893 /* TelegramProxyConfiguration.swift */; };
+		38A3116E159F4A6590B8344D /* TelegramProxyConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF592DBE118E4B69B72E4893 /* TelegramProxyConfiguration.swift */; };
+		3CCCBA7823524A529046ED9B /* TelegramProxyController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2339410409F491DB30DBB69 /* TelegramProxyController.swift */; };
+		202E8FE0D4AB4AC99DDB9CCD /* TelegramProxyController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2339410409F491DB30DBB69 /* TelegramProxyController.swift */; };
+		CCC9D18FAB7A4BA08F8F1FC1 /* TelegramProxyController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2339410409F491DB30DBB69 /* TelegramProxyController.swift */; };
+		A8303775B6AD458E9B0A17D6 /* TelegramProxySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5E8A550542D4878B928949D /* TelegramProxySettingsView.swift */; };
+		04700D852463480EBB956A5A /* TelegramProxySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5E8A550542D4878B928949D /* TelegramProxySettingsView.swift */; };
+		81492252DBBA42789326E23B /* TelegramProxySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5E8A550542D4878B928949D /* TelegramProxySettingsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -200,6 +209,9 @@
 		3B214D9DE7975166D4F2CF90 /* VideoModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoModels.swift; sourceTree = "<group>"; };
 		447E4CE910C554F945FBB68F /* VideoPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoPlayer.swift; sourceTree = "<group>"; };
 		1A13083BFC30BBFC91565DEF /* VideoLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoLibraryView.swift; sourceTree = "<group>"; };
+		EF592DBE118E4B69B72E4893 /* TelegramProxyConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramProxyConfiguration.swift; sourceTree = "<group>"; };
+		F2339410409F491DB30DBB69 /* TelegramProxyController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramProxyController.swift; sourceTree = "<group>"; };
+		F5E8A550542D4878B928949D /* TelegramProxySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramProxySettingsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -236,6 +248,7 @@
 		27385ED814DE06E09B62B246 /* Telegram */ = {
 			isa = PBXGroup;
 			children = (
+				F2339410409F491DB30DBB69 /* TelegramProxyController.swift */,
 				6C6F59243ACDA14748435998 /* TelegramMapping.swift */,
 				3F2FCA53B713BBAE7EF9C471 /* TelegramService.swift */,
 			);
@@ -262,6 +275,7 @@
 		7165085D5C89935F74AE3CB3 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				F5E8A550542D4878B928949D /* TelegramProxySettingsView.swift */,
 				1A13083BFC30BBFC91565DEF /* VideoLibraryView.swift */,
 				E7B07A69B310BD8ADB95C699 /* BotSearchView.swift */,
 				3A296FC32DFAD74456756D1C /* Components.swift */,
@@ -304,6 +318,7 @@
 		7D7579E3BDFEC0239D9EEF56 /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				EF592DBE118E4B69B72E4893 /* TelegramProxyConfiguration.swift */,
 				3B214D9DE7975166D4F2CF90 /* VideoModels.swift */,
 				A5E7173B5042D701CCD0BB3F /* AppConfiguration.swift */,
 				A065497ED165324D5CBEFDE8 /* Formatting.swift */,
@@ -553,6 +568,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A8303775B6AD458E9B0A17D6 /* TelegramProxySettingsView.swift in Sources */,
+				3CCCBA7823524A529046ED9B /* TelegramProxyController.swift in Sources */,
+				54F6559288D44AFBBF056045 /* TelegramProxyConfiguration.swift in Sources */,
 				22BF53271216072E9218F281 /* VideoLibraryView.swift in Sources */,
 				0577244EB573F4678A51E03B /* VideoPlayer.swift in Sources */,
 				9704A2624BA169E4D9D41328 /* VideoModels.swift in Sources */,
@@ -595,6 +613,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				04700D852463480EBB956A5A /* TelegramProxySettingsView.swift in Sources */,
+				202E8FE0D4AB4AC99DDB9CCD /* TelegramProxyController.swift in Sources */,
+				05375B959D6C4130AF2D97C6 /* TelegramProxyConfiguration.swift in Sources */,
 				F422DD7C0A76DB13F0F52BC7 /* VideoLibraryView.swift in Sources */,
 				BF17C90C86A19022B7205435 /* VideoPlayer.swift in Sources */,
 				2BDF94C4F1266E17698C7B17 /* VideoModels.swift in Sources */,
@@ -637,6 +658,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				81492252DBBA42789326E23B /* TelegramProxySettingsView.swift in Sources */,
+				CCC9D18FAB7A4BA08F8F1FC1 /* TelegramProxyController.swift in Sources */,
+				38A3116E159F4A6590B8344D /* TelegramProxyConfiguration.swift in Sources */,
 				F91825E71FE9EE4FF93066F7 /* VideoLibraryView.swift in Sources */,
 				3D541F95A1D18CEE28CAA354 /* VideoPlayer.swift in Sources */,
 				ADFEC8430EFC2C5F37AAC1BD /* VideoModels.swift in Sources */,
@@ -683,7 +707,7 @@
 			baseConfigurationReference = CF1D062C6A533F2A90AEB96E /* Telisten.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = "Telisten/Telisten-iOS.entitlements";
+				CODE_SIGN_ENTITLEMENTS = "Telisten/Telisten-visionOS.entitlements";
 				DEVELOPMENT_TEAM = 58ZQC3ACLK;
 				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = "Telisten/Info-visionOS.plist";
@@ -761,7 +785,7 @@
 			baseConfigurationReference = CF1D062C6A533F2A90AEB96E /* Telisten.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = "Telisten/Telisten-iOS.entitlements";
+				CODE_SIGN_ENTITLEMENTS = "Telisten/Telisten-visionOS.entitlements";
 				DEVELOPMENT_TEAM = 58ZQC3ACLK;
 				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = "Telisten/Info-visionOS.plist";

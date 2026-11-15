@@ -98,6 +98,7 @@ final class AppModel: ObservableObject {
     }
 
     let player = AudioPlayer()
+    let proxyController: TelegramProxyController
 
     private var cancellables: Set<AnyCancellable> = []
 
@@ -176,7 +177,9 @@ final class AppModel: ObservableObject {
         self.localLibrary = localLibrary
         artworkStore = ArtworkStore()
         chatAvatarStore = ChatAvatarStore()
-        telegram = TelegramService(keychain: keychain)
+        let telegram = TelegramService(keychain: keychain)
+        self.telegram = telegram
+        proxyController = TelegramProxyController(telegram: telegram, keychain: keychain)
         lyrics = LyricsService(provider: LRCLIBProvider(serverURL: lyricsServerURL))
         hasCredentials = (try? TelegramCredentials.appCredentials()) != nil
         cachedIDs = cache.initialCachedTrackIDs
@@ -209,6 +212,7 @@ final class AppModel: ObservableObject {
     }
 
     func start() async {
+        await proxyController.start()
         await refreshCacheUsage()
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--offline") {
@@ -1726,6 +1730,7 @@ final class AppModel: ObservableObject {
     }
 
     func applicationDidBecomeActive() async {
+        await proxyController.refresh()
         guard phase == .ready,
               hasCredentials,
               await telegram.hasAuthorizedSession() else { return }

@@ -72,18 +72,58 @@ final class KeychainStore: @unchecked Sendable {
     func loadOrCreateTDLibDatabaseKey(accountID: String) -> Data? {
         withLock {
             let account = AccountKey.tdlibDatabaseKey(accountID: accountID)
-            if let data = loadDeviceLocal(account: account), data.count == 32 { return data }
-            let data = Data((0..<32).map { _ in UInt8.random(in: .min ... .max) })
-            return saveDeviceLocal(data, account: account) ? data : nil
+            do {
+                if let data = try loadThrowing(account: account, synchronizable: false) {
+                    return data.count == 32 ? data : nil
+                }
+                let data = Data((0..<32).map { _ in UInt8.random(in: .min ... .max) })
+                return saveDeviceLocal(data, account: account) ? data : nil
+            } catch {
+                // An inaccessible key is not a missing key. Never replace it.
+                return nil
+            }
+        }
+    }
+
+    func loadTDLibDatabaseKey(accountID: String) -> Data? {
+        withLock {
+            guard let data = loadDeviceLocal(account: AccountKey.tdlibDatabaseKey(accountID: accountID)),
+                  data.count == 32 else { return nil }
+            return data
         }
     }
 
     func copyTDLibDatabaseKey(from sourceAccountID: String, to destinationAccountID: String) -> Bool {
         guard sourceAccountID != destinationAccountID else { return true }
         return withLock {
-            guard let data = loadDeviceLocal(account: AccountKey.tdlibDatabaseKey(accountID: sourceAccountID)),
-                  data.count == 32 else { return false }
-            return saveDeviceLocal(data, account: AccountKey.tdlibDatabaseKey(accountID: destinationAccountID))
+            do {
+                guard let data = try loadThrowing(
+                    account: AccountKey.tdlibDatabaseKey(accountID: sourceAccountID), synchronizable: false
+                ), data.count == 32 else {
+                    PlaybackDiagnostics.log("telegram_database_key_copy_failed reason=sourceKeyMissingOrInvalid")
+                    return false
+                }
+                // Preserve the actual OSStatus in diagnostics instead of hiding
+                // a read/write failure behind the generic session error.
+                try save(data, account: AccountKey.tdlibDatabaseKey(accountID: destinationAccountID), synchronizable: false)
+                return true
+            } catch {
+                PlaybackDiagnostics.log("telegram_database_key_copy_failed", error: error)
+                return false
+            }
+        }
+    }
+
+    // LAN proxy credentials are device-local and do not follow iCloud accounts.
+    func saveTelegramProxyConfiguration(_ configuration: TelegramProxyConfiguration) -> Bool {
+        guard let data = try? JSONEncoder().encode(configuration) else { return false }
+        return withLock { saveDeviceLocal(data, account: "telegram.proxy.v1") }
+    }
+
+    func loadTelegramProxyConfiguration() -> TelegramProxyConfiguration? {
+        withLock {
+            guard let data = loadDeviceLocal(account: "telegram.proxy.v1") else { return nil }
+            return try? JSONDecoder().decode(TelegramProxyConfiguration.self, from: data)
         }
     }
 

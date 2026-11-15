@@ -76,6 +76,28 @@ esac
 rm -rf "$tipa_work_dir"
 mkdir -p "$tipa_work_dir/Payload"
 ditto "$app" "$tipa_work_dir/Payload/Telisten.app"
+
+# CODE_SIGNING_ALLOWED=NO omits the entitlement blob. Embed it in an ad-hoc
+# signature so TrollStore can preserve Wi-Fi access when it signs the app.
+packaged_app="$tipa_work_dir/Payload/Telisten.app"
+package_entitlements="$tipa_work_dir/Telisten.entitlements"
+cp "$project_dir/Telisten/Telisten-iOS.entitlements" "$package_entitlements"
+keychain_prefix=$(/usr/libexec/PlistBuddy -c 'Print :TelistenKeychainAccessGroupPrefix' "$app/Info.plist")
+bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")
+/usr/libexec/PlistBuddy -c "Set :keychain-access-groups:0 ${keychain_prefix}${bundle_id}" "$package_entitlements"
+for framework in "$packaged_app"/Frameworks/*.framework; do
+  [ -d "$framework" ] || continue
+  codesign --force --sign - "$framework"
+done
+codesign --force --sign - --entitlements "$package_entitlements" "$packaged_app"
+codesign --verify --deep --strict "$packaged_app"
+codesign -d --entitlements :- "$packaged_app" > "$tipa_work_dir/embedded-entitlements.plist" 2>/dev/null
+wifi_entitlement=$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.networking.wifi-info' "$tipa_work_dir/embedded-entitlements.plist")
+if [ "$wifi_entitlement" != 'true' ]; then
+  echo 'Packaged app is missing the Wi-Fi information entitlement' >&2
+  exit 1
+fi
+
 ditto -c -k --sequesterRsrc --keepParent \
   "$tipa_work_dir/Payload" \
   "$tipa_work_dir/Telisten-iOS-16.3.tipa.zip"

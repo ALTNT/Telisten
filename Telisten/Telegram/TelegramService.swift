@@ -84,6 +84,7 @@ actor TelegramService {
         case emptyBotMessage
         case unsupportedBotButton
         case sessionPersistenceFailed
+        case sessionReplacementFailed
         case telegram(String)
 
         var errorDescription: String? {
@@ -115,6 +116,7 @@ actor TelegramService {
             case .emptyBotMessage: "Enter something to send to the search bot."
             case .unsupportedBotButton: "This bot button needs a Telegram feature that Telisten does not support yet."
             case .sessionPersistenceFailed: "Telisten could not save the Telegram session in Keychain. Check the app signature and try again."
+            case .sessionReplacementFailed: "Could not replace the local Telegram session. The existing session was preserved. Export logs for details."
             case let .telegram(message): message
             }
         }
@@ -142,6 +144,79 @@ actor TelegramService {
     private var searchBotPeers: [String: MusicChat] = [:]
     private var lyricsAttachmentCache: [String: [TelegramLyricsAttachment]] = [:]
     private var replacingSession = false
+    private var desiredProxy: SOCKS5ProxyConfiguration?
+    private var appliedProxy: SOCKS5ProxyConfiguration?
+    private var proxyClientReady = false
+    private var proxyClientID: Int32?
+    private var proxyUpdateTask: Task<Void, Swift.Error>?
+
+    func setConnectionProxy(_ proxy: SOCKS5ProxyConfiguration?) async throws {
+        desiredProxy = proxy
+        // Network polling must not reopen a database while a reauthorized
+        // session is being moved into place.
+        guard !replacingSession else { return }
+        // Saving a proxy must also recover a client that was never initialized
+        // or was closed after a failed startup, rather than only updating UI.
+        if client == nil, credentials != nil {
+            do {
+                _ = try await requireClient()
+            } catch {
+                PlaybackDiagnostics.log("telegram_proxy_client_unavailable", error: error)
+                throw error
+            }
+        }
+        let previous = proxyUpdateTask
+        // Actor methods can reenter while TDLib is awaited. Chain changes so an
+        // older Wi-Fi update cannot finish after a newer mobile-data update.
+        let task = Task {
+            _ = try? await previous?.value
+            guard let client = self.client, self.proxyClientReady, !self.replacingSession else {
+                PlaybackDiagnostics.log("telegram_proxy_deferred clientAvailable=\(self.client != nil) clientReady=\(self.proxyClientReady)")
+                return
+            }
+            let target = self.desiredProxy
+            guard self.proxyClientID != client.id || self.appliedProxy != target else { return }
+            PlaybackDiagnostics.log("telegram_proxy_apply_start client=\(client.id) target=\(target.map { "SOCKS5 \($0.server):\($0.port)" } ?? "direct")")
+            var enabledID: Int?
+            if let target {
+                guard target.isValid, let port = Int(target.port) else { throw ServiceError.telegram("Invalid SOCKS5 proxy settings.") }
+                let added = try await client.addProxy(
+                    comment: "Telisten", enable: true,
+                    proxy: Proxy(port: port, server: target.server, type: .proxyTypeSocks5(
+                        ProxyTypeSocks5(password: target.password, username: target.username)
+                    ))
+                )
+                enabledID = added.id
+            } else {
+                _ = try await client.disableProxy()
+            }
+            // Check TDLib's actual enabled proxy before reporting success.
+            let proxies = try await client.getProxies()
+            let enabled = proxies.proxies.first(where: \.isEnabled)
+            guard enabled?.id == enabledID else {
+                throw ServiceError.telegram("TDLib did not apply the selected proxy.")
+            }
+            self.appliedProxy = target
+            self.proxyClientID = client.id
+            PlaybackDiagnostics.log("telegram_proxy_apply_complete client=\(client.id) enabled=\(enabled != nil) proxyID=\(enabledID ?? 0)")
+            // Remove obsolete credentials from TDLib's persisted proxy list.
+            for item in proxies.proxies where item.comment == "Telisten" && item.id != enabledID {
+                _ = try? await client.removeProxy(proxyId: item.id)
+            }
+        }
+        proxyUpdateTask = task
+        do {
+            try await task.value
+        } catch {
+            PlaybackDiagnostics.log("telegram_proxy_apply_failed", error: error)
+            throw error
+        }
+    }
+
+    func connectionProxyIsApplied(_ proxy: SOCKS5ProxyConfiguration?) -> Bool {
+        guard let client, proxyClientReady else { return false }
+        return proxyClientID == client.id && appliedProxy == proxy
+    }
 
     init(keychain: KeychainStore) {
         self.keychain = keychain
@@ -349,7 +424,7 @@ actor TelegramService {
 
     func replaceCurrentSession(withAccountID replacementAccountID: String) async throws {
         guard replacementAccountID != accountID else { return }
-        guard !replacingSession else { throw ServiceError.sessionPersistenceFailed }
+        guard !replacingSession else { throw ServiceError.sessionReplacementFailed }
         replacingSession = true
         defer { replacingSession = false }
 
@@ -357,23 +432,53 @@ actor TelegramService {
         let sourceURL = storageURL(for: sourceID)
         let destinationURL = storageURL(for: replacementAccountID)
         await closeClient()
+        var backupURL: URL?
+        var movedNewSession = false
+        var replacementStage = "checkSource"
+        PlaybackDiagnostics.log("telegram_session_replacement_start")
         do {
-            if FileManager.default.fileExists(atPath: sourceURL.path) {
-                guard !FileManager.default.fileExists(atPath: destinationURL.path) else {
-                    throw ServiceError.sessionPersistenceFailed
-                }
-                try FileManager.default.createDirectory(
-                    at: destinationURL.deletingLastPathComponent(),
-                    withIntermediateDirectories: true
-                )
-                try FileManager.default.moveItem(at: sourceURL, to: destinationURL)
+            guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+                throw ServiceError.sessionReplacementFailed
             }
+            if FileManager.default.fileExists(atPath: destinationURL.path) {
+                // finishLogin calls this only after authorizing the same
+                // Telegram user. Back up even when no failure was observed
+                // in this process, including after an app restart.
+                replacementStage = "backupExistingDatabase"
+                let backup = destinationURL.deletingLastPathComponent().appendingPathComponent(
+                    destinationURL.lastPathComponent + "-backup-" + UUID().uuidString,
+                    isDirectory: true
+                )
+                try FileManager.default.moveItem(at: destinationURL, to: backup)
+                backupURL = backup
+                PlaybackDiagnostics.log("telegram_session_database_backed_up")
+            }
+            replacementStage = "moveAuthorizedDatabase"
+            try FileManager.default.createDirectory(
+                at: destinationURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try FileManager.default.moveItem(at: sourceURL, to: destinationURL)
+            movedNewSession = true
+            replacementStage = "copyDatabaseKey"
             guard keychain.copyTDLibDatabaseKey(from: sourceID, to: replacementAccountID) else {
                 throw ServiceError.sessionPersistenceFailed
             }
         } catch {
-            throw ServiceError.sessionPersistenceFailed
+            PlaybackDiagnostics.log("telegram_session_replacement_failed stage=\(replacementStage)", error: error)
+            // Roll back filesystem changes if the new session/key cannot commit.
+            if movedNewSession {
+                do { try FileManager.default.moveItem(at: destinationURL, to: sourceURL) }
+                catch { PlaybackDiagnostics.log("telegram_session_replacement_rollback_failed stage=restoreNewSession", error: error) }
+            }
+            if let backupURL {
+                do { try FileManager.default.moveItem(at: backupURL, to: destinationURL) }
+                catch { PlaybackDiagnostics.log("telegram_session_replacement_rollback_failed stage=restoreBackup", error: error) }
+            }
+            if replacementStage == "copyDatabaseKey" { throw ServiceError.sessionPersistenceFailed }
+            throw ServiceError.sessionReplacementFailed
         }
+        PlaybackDiagnostics.log("telegram_session_replacement_complete")
         accountID = replacementAccountID
         authorizationState = nil
         _ = keychain.setTDLibAccount(sourceID, authorized: false)
@@ -1111,11 +1216,9 @@ actor TelegramService {
 
     func loadPlaylistChats(from chats: [MusicChat], folderName: String) async throws -> [MusicChat] {
         let normalizedName = PlaylistFolderConfiguration.normalizedName(folderName) ?? PlaylistFolderConfiguration.defaultName
-        guard let folderID = UserDefaults.standard.object(forKey: playlistFolderKey(normalizedName)) as? Int else {
-            return []
-        }
         let client = try await requireReadyClient()
-        guard let folder = try? await client.getChatFolder(chatFolderId: folderID) else { return [] }
+        guard let folderID = try await existingPlaylistFolderID(named: normalizedName, client: client) else { return [] }
+        let folder = try await client.getChatFolder(chatFolderId: folderID)
         let included = Set(folder.includedChatIds)
         return chats.filter { included.contains($0.peerID) && $0.kind == .channel }
     }
@@ -1147,9 +1250,9 @@ actor TelegramService {
         }
         let client = try await requireReadyClient()
         let key = playlistFolderKey(name)
-        let folderID = UserDefaults.standard.object(forKey: key) as? Int
         do {
-            if let folderID, let existing = try? await client.getChatFolder(chatFolderId: folderID) {
+            if let folderID = try await existingPlaylistFolderID(named: name, client: client) {
+                let existing = try await client.getChatFolder(chatFolderId: folderID)
                 let updated = ChatFolder(
                     colorId: existing.colorId,
                     excludeArchived: existing.excludeArchived,
@@ -1448,12 +1551,27 @@ actor TelegramService {
     }
 
     private func requireClient() async throws -> TDLibClient {
+        guard !replacingSession else { throw ServiceError.noConnection }
         if let client { return client }
         guard let credentials else { throw ServiceError.notConfigured }
-        guard let databaseKey = keychain.loadOrCreateTDLibDatabaseKey(accountID: accountID) else {
+        let directory = storageURL(for: accountID)
+        let existingFiles: [String]
+        if FileManager.default.fileExists(atPath: directory.path) {
+            guard let files = try? FileManager.default.contentsOfDirectory(atPath: directory.path) else {
+                throw ServiceError.sessionPersistenceFailed
+            }
+            existingFiles = files
+        } else {
+            existingFiles = []
+        }
+        let hasDatabase = existingFiles.contains { $0.hasPrefix("td.binlog") || $0.hasPrefix("db.sqlite") }
+        // Never generate a replacement key for an existing encrypted database.
+        let storedKey = hasDatabase
+            ? keychain.loadTDLibDatabaseKey(accountID: accountID)
+            : keychain.loadOrCreateTDLibDatabaseKey(accountID: accountID)
+        guard let databaseKey = storedKey else {
             throw ServiceError.sessionPersistenceFailed
         }
-        let directory = storageURL(for: accountID)
         let filesDirectory = directory.appendingPathComponent("files", isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -1466,7 +1584,9 @@ actor TelegramService {
         let created = manager.createClient(updateHandler: { [weak self] data, _ in
             Task.detached { [weak self, data] in await self?.receiveUpdate(data) }
         })
+        proxyClientReady = false
         client = created
+        var initializationStage = "getAuthorizationState"
         do {
             var state = try await created.getAuthorizationState()
             if case .authorizationStateWaitTdlibParameters = state {
@@ -1477,6 +1597,7 @@ actor TelegramService {
                 #else
                 let deviceModel = "Apple device"
                 #endif
+                initializationStage = "setTdlibParameters"
                 _ = try await created.setTdlibParameters(
                     apiHash: credentials.apiHash,
                     apiId: Int(credentials.apiID),
@@ -1493,15 +1614,27 @@ actor TelegramService {
                     useSecretChats: false,
                     useTestDc: false
                 )
+                initializationStage = "getAuthorizationStateAfterParameters"
                 state = try await created.getAuthorizationState()
             }
+            // TDLib needs its database parameters before proxy configuration;
+            // apply before issuing any login or media request.
+            proxyClientReady = true
+            initializationStage = "applyConnectionProxy"
+            try await setConnectionProxy(desiredProxy)
             authorizationState = state
             if case .authorizationStateReady = state {
                 _ = keychain.setTDLibAccount(accountID, authorized: true)
             }
             return created
         } catch {
+            // TDLibKit.Error does not implement LocalizedError; bridging it to
+            // NSError loses both its real code and message. Preserve them here.
+            let tdlibCode = (error as? TDLibKit.Error).map { String($0.code) } ?? "none"
+            let readableError = readableLoginError(error)
+            PlaybackDiagnostics.log("telegram_client_initialization_failed stage=\(initializationStage) tdlibCode=\(tdlibCode)", error: readableError)
             client = nil
+            proxyClientReady = false
             _ = try? await created.close()
             throw readableLoginError(error)
         }
@@ -2020,6 +2153,7 @@ actor TelegramService {
         videoPlaybackChoices.removeAll()
         guard let client else { return }
         self.client = nil
+        proxyClientReady = false
         _ = try? await client.close()
     }
 
@@ -2038,6 +2172,27 @@ actor TelegramService {
 
     private var authorizationDefaultsKey: String {
         "tdlib.authorized.\(accountID)"
+    }
+
+    private func existingPlaylistFolderID(named name: String, client: TDLibClient) async throws -> Int? {
+        let key = playlistFolderKey(name)
+        let cachedID = UserDefaults.standard.object(forKey: key) as? Int
+        let state = try await client.getCurrentState()
+        for update in state.updates {
+            if case let .updateChatFolders(value) = update {
+                // Discover folders created by other clients and reject stale or renamed cached IDs.
+                let matches = value.chatFolders.filter { $0.name.text.text == name }
+                let folderID = matches.first(where: { $0.id == cachedID })?.id ?? matches.first?.id
+                if let folderID {
+                    UserDefaults.standard.set(folderID, forKey: key)
+                } else {
+                    UserDefaults.standard.removeObject(forKey: key)
+                }
+                return folderID
+            }
+        }
+        // An unavailable folder list must not be treated as permission to create a duplicate.
+        throw ServiceError.playlistFolderFailed
     }
 
     private func playlistFolderKey(_ name: String) -> String {

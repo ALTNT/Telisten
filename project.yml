@@ -88,6 +88,10 @@ targets:
         TelegramAPIID: $(TELEGRAM_API_ID)
         TelegramAPIHash: $(TELEGRAM_API_HASH)
         TelistenKeychainAccessGroupPrefix: $(AppIdentifierPrefix)
+        NSLocationWhenInUseUsageDescription: "Telisten reads your Wi-Fi name to choose the Telegram proxy you configured. Your location is not recorded."
+        NSLocationTemporaryUsageDescriptionDictionary:
+          WiFiProxy: "Precise location permission lets Telisten read the Wi-Fi name for automatic proxy switching."
+        NSLocalNetworkUsageDescription: "Telisten connects to the SOCKS5 proxy you configured on your local network."
         UIBackgroundModes:
           - audio
         UISupportedInterfaceOrientations:
@@ -152,7 +156,7 @@ targets:
           UIApplicationPreferredDefaultSceneSessionRole: UIWindowSceneSessionRoleApplication
     settings:
       base:
-        CODE_SIGN_ENTITLEMENTS: Telisten/Telisten-iOS.entitlements
+        CODE_SIGN_ENTITLEMENTS: Telisten/Telisten-visionOS.entitlements
         TARGETED_DEVICE_FAMILY: "7"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES

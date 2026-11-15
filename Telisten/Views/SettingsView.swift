@@ -5,6 +5,7 @@ struct SettingsView: View {
     @AppStorage("video.prefer1080p") private var prefer1080p = true
     @ObservedObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    @State private var isShowingProxySettings = false
     @State private var lyricsServerDraft = ""
     @State private var lyricsServerError: String?
     @State private var isApplyingLyricsServer = false
@@ -24,6 +25,12 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Network") {
+                    Button("Telegram proxy") { isShowingProxySettings = true }
+                }
+                .sheet(isPresented: $isShowingProxySettings) {
+                    TelegramProxySettingsView(controller: model.proxyController)
+                }
                 Section("Library") {
                     Toggle("Show chats on homepage", isOn: $model.showChats)
                     Text("Telegram chats containing music appear below playlists when enabled.")
