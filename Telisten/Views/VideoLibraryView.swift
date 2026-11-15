@@ -2,6 +2,8 @@ import AVKit
 import Combine
 import SwiftUI
 
+private let videoPlaybackRates: [Float] = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]
+
 @MainActor
 final class VideoLibraryModel: ObservableObject {
     @Published var folders: [VideoFolder] = []
@@ -382,6 +384,7 @@ private struct VideoPlaybackView: View {
     @Environment(\.scenePhase) private var scenePhase
     #if os(iOS)
     @Environment(\.isPresented) private var isPresented
+    @State private var isPictureInPictureActive = false
     #endif
     @State private var started = false
     private var closeWindow: (() -> Void)?
@@ -437,7 +440,13 @@ private struct VideoPlaybackView: View {
             // update and can repeatedly re-enter this KVO subscription.
             if status == .playing, musicPlayer.isPlaying || musicPlayer.isLoading { musicPlayer.pause() }
         }
-        #if !os(macOS)
+        #if os(iOS)
+        .onChange(of: scenePhase) { phase in
+            // AVKit starts PiP before moving the app into the background.
+            // Keep its resource loader playing while the floating video is active.
+            if phase == .background, !isPictureInPictureActive { playback.pause() }
+        }
+        #elseif !os(macOS)
         .onChange(of: scenePhase) { phase in
             if phase != .active { playback.pause() }
         }
@@ -449,7 +458,8 @@ private struct VideoPlaybackView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             // One native player owns the controls in both portrait and landscape.
-            IOSVideoSurfaceView(player: playback.player).ignoresSafeArea(.container, edges: [.horizontal, .bottom])
+            IOSVideoSurfaceView(player: playback.player, isPictureInPictureActive: $isPictureInPictureActive)
+                .ignoresSafeArea(.container, edges: [.horizontal, .bottom])
             if let error = playback.errorMessage {
                 VStack(spacing: 12) {
                     Text(error).multilineTextAlignment(.center)
@@ -536,17 +546,57 @@ private struct VideoPlaybackView: View {
 #if os(iOS)
 private struct IOSVideoSurfaceView: UIViewControllerRepresentable {
     let player: AVPlayer
+    @Binding var isPictureInPictureActive: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(isPictureInPictureActive: $isPictureInPictureActive)
+    }
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = AVPlayerViewController()
         controller.player = player
         controller.videoGravity = .resizeAspect
         controller.showsPlaybackControls = true
+        controller.allowsPictureInPicturePlayback = true
+        controller.canStartPictureInPictureAutomaticallyFromInline = true
+        controller.speeds = videoPlaybackRates.map { AVPlaybackSpeed(rate: $0, localizedName: "\($0)×") }
+        controller.delegate = context.coordinator
         return controller
     }
 
     func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
         if controller.player !== player { controller.player = player }
+    }
+
+    final class Coordinator: NSObject, AVPlayerViewControllerDelegate {
+        private var isPictureInPictureActive: Binding<Bool>
+
+        init(isPictureInPictureActive: Binding<Bool>) {
+            self.isPictureInPictureActive = isPictureInPictureActive
+        }
+
+        func playerViewControllerWillStartPictureInPicture(_ playerViewController: AVPlayerViewController) {
+            isPictureInPictureActive.wrappedValue = true
+        }
+
+        func playerViewController(_ playerViewController: AVPlayerViewController, failedToStartPictureInPictureWithError error: Error) {
+            isPictureInPictureActive.wrappedValue = false
+        }
+
+        func playerViewControllerDidStopPictureInPicture(_ playerViewController: AVPlayerViewController) {
+            isPictureInPictureActive.wrappedValue = false
+        }
+
+        func playerViewControllerShouldAutomaticallyDismissAtPictureInPictureStart(_ playerViewController: AVPlayerViewController) -> Bool {
+            // Dismissing the cover would stop the model and its byte requests.
+            false
+        }
+
+        func playerViewController(_ playerViewController: AVPlayerViewController,
+                                  restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
+            // The playback cover remains presented for the lifetime of PiP.
+            completionHandler(true)
+        }
     }
 }
 #endif
@@ -677,11 +727,25 @@ final class VideoPlaybackWindow: NSObject, NSWindowDelegate {
 private struct VideoSurfaceView: NSViewRepresentable {
     let player: AVPlayer
 
+    func makeCoordinator() -> Coordinator { Coordinator(player: player) }
+
     func makeNSView(context: Context) -> AVPlayerView {
         let view = AVPlayerView()
         view.player = player
         view.controlsStyle = .floating
         view.showsFullScreenToggleButton = true
+        view.allowsPictureInPicturePlayback = true
+        view.speeds = videoPlaybackRates.map { AVPlaybackSpeed(rate: $0, localizedName: "\($0)×") }
+        // The floating controls on older macOS versions also expose speed
+        // through the action menu, next to the full-screen and PiP buttons.
+        let menu = NSMenu()
+        for rate in videoPlaybackRates {
+            let item = NSMenuItem(title: "\(rate)×", action: #selector(Coordinator.selectSpeed(_:)), keyEquivalent: "")
+            item.representedObject = rate
+            item.target = context.coordinator
+            menu.addItem(item)
+        }
+        view.actionPopUpButtonMenu = menu
         return view
     }
 
@@ -690,8 +754,28 @@ private struct VideoSurfaceView: NSViewRepresentable {
         if view.player !== player { view.player = player }
     }
 
-    static func dismantleNSView(_ view: AVPlayerView, coordinator: ()) {
+    static func dismantleNSView(_ view: AVPlayerView, coordinator: Coordinator) {
+        view.actionPopUpButtonMenu = nil
         view.player = nil
+    }
+
+    final class Coordinator: NSObject, NSMenuItemValidation {
+        private let player: AVPlayer
+
+        init(player: AVPlayer) { self.player = player }
+
+        @objc func selectSpeed(_ sender: NSMenuItem) {
+            guard let rate = sender.representedObject as? Float else { return }
+            // defaultRate preserves the selection across pause/resume; setting
+            // rate only while playing avoids resuming a paused video.
+            player.defaultRate = rate
+            if player.rate != 0 { player.rate = rate }
+        }
+
+        func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+            menuItem.state = (menuItem.representedObject as? Float) == player.defaultRate ? .on : .off
+            return player.currentItem?.status == .readyToPlay
+        }
     }
 }
 #endif
