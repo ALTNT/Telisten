@@ -319,25 +319,45 @@ private struct PlaybackQueue: View {
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(Array(model.queue.enumerated()), id: \.element.id) { index, track in
-                    HStack(spacing: 12) {
-                        TrackArtwork(model: model, track: track, size: 38)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(track.displayTitle).lineLimit(1)
-                            Text(track.displayArtist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if let playlist = model.importedPlaylists.first(where: { $0.id == model.playingImportedPlaylistID }) {
+                    ForEach(playlist.entries) { entry in
+                        Button { model.playImportedEntry(entry.id, in: playlist.id) } label: {
+                            HStack {
+                                VStack(alignment: .leading) {
+                                    Text(entry.title.isEmpty ? entry.songID : entry.title).lineLimit(1)
+                                    Text(entry.artists.joined(separator: " / ")).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if entry.id == model.playingImportedEntryID {
+                                    Image(systemName: "speaker.wave.2.fill")
+                                }
+                            }
+                            .padding(14)
                         }
-                        Spacer()
-                        if index == model.currentQueueIndex {
-                            Image(systemName: "speaker.wave.2.fill").foregroundStyle(Color.telistenAccent)
-                        }
+                        .buttonStyle(.plain)
+                        .disabled(model.resolvingImportedEntryID != nil)
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 11)
-                    .contentShape(Rectangle())
-                    .onTapGesture { model.play(track, from: model.queue) }
+                } else {
+                    ForEach(Array(model.queue.enumerated()), id: \.element.id) { index, track in
+                        HStack(spacing: 12) {
+                            TrackArtwork(model: model, track: track, size: 38)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(track.displayTitle).lineLimit(1)
+                                Text(track.displayArtist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            Spacer()
+                            if index == model.currentQueueIndex {
+                                Image(systemName: "speaker.wave.2.fill").foregroundStyle(Color.telistenAccent)
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 11)
+                        .contentShape(Rectangle())
+                        .onTapGesture { model.play(track, from: model.queue) }
 
-                    if index < model.queue.count - 1 {
-                        Divider().padding(.leading, 64)
+                        if index < model.queue.count - 1 {
+                            Divider().padding(.leading, 64)
+                        }
                     }
                 }
             }

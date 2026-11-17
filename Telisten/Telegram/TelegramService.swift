@@ -142,6 +142,8 @@ actor TelegramService {
     private var connectionStateObservers: [UUID: AsyncStream<String>.Continuation] = [:]
     private var loginTokenUpdateRevision: UInt64 = 0
     private var searchBotPeers: [String: MusicChat] = [:]
+    private var isResolvingImportedMusic = false
+    private var importedMusicRetryAfter: [String: Foundation.Date] = [:]
     private var lyricsAttachmentCache: [String: [TelegramLyricsAttachment]] = [:]
     private var replacingSession = false
     private var reconnectingClient = false
@@ -645,6 +647,9 @@ actor TelegramService {
         to config: SearchBotConfig,
         settleForAudio: Bool
     ) async throws -> [BotSearchMessage] {
+        guard !isResolvingImportedMusic else {
+            throw ServiceError.telegram("A playlist song is being requested. Wait for it to finish before using the bot.")
+        }
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ServiceError.emptyBotMessage
         }
@@ -703,6 +708,9 @@ actor TelegramService {
     }
 
     func pressBotButton(_ button: BotSearchButton, for config: SearchBotConfig) async throws -> [BotSearchMessage] {
+        guard !isResolvingImportedMusic else {
+            throw ServiceError.telegram("A playlist song is being requested. Wait for it to finish before using the bot.")
+        }
         switch button.action {
         case let .sendText(text):
             return try await sendBotMessage(text, to: config, settleForAudio: true)
@@ -755,6 +763,78 @@ actor TelegramService {
             .filter { $0.sendingState == nil }
             .sorted { $0.id < $1.id }
             .compactMap(TelegramMapping.botMessage(from:))
+    }
+
+    func resolveImportedMusic(_ entry: ImportedPlaylistEntry, using config: SearchBotConfig) async throws -> Track {
+        guard !isResolvingImportedMusic else {
+            throw ServiceError.telegram("Another playlist song is still being requested. Please try again shortly.")
+        }
+        let botKey = "\(accountID):\(config.normalizedBotName.lowercased())"
+        if let retryAfter = importedMusicRetryAfter[botKey], retryAfter > Foundation.Date() {
+            throw ServiceError.telegram("The previous music request may still be queued. Wait one minute before retrying.")
+        }
+        isResolvingImportedMusic = true
+        var completed = false
+        var startedRequest = false
+        defer {
+            isResolvingImportedMusic = false
+            if startedRequest && !completed { importedMusicRetryAfter[botKey] = Foundation.Date().addingTimeInterval(60) }
+        }
+        let bot = try await resolveSearchBot(config)
+        let client = try await requireReadyClient()
+        let baseline = try await botHistoryMessages(client: client, chatID: bot.peerID, limit: 100)
+        let baselineIDs = Set(baseline.map(\.id))
+        let command = "/music \(entry.songURL.absoluteString)"
+        try Task.checkCancellation()
+        startedRequest = true
+        _ = try await client.sendMessage(chatId: bot.peerID,
+            inputMessageContent: .inputMessageText(InputMessageText(clearDraft: false, linkPreviewOptions: nil,
+                text: FormattedText(entities: [], text: command))),
+            options: nil, replyMarkup: nil, replyTo: nil, topicId: nil)
+        let deadline = Foundation.Date().addingTimeInterval(120)
+        var commandIDs: Set<Int64> = []
+        var matcher = ImportedMusicReplyMatcher(entry: entry)
+        var lastReply = ""
+        while Foundation.Date() < deadline {
+            try Task.checkCancellation()
+            try await Task.sleep(for: .seconds(2))
+            let history = try await botHistoryMessages(client: client, chatID: bot.peerID, limit: 100)
+            for message in history where message.isOutgoing && message.sendingState == nil && !baselineIDs.contains(message.id) {
+                if TelegramMapping.text(from: message).trimmingCharacters(in: .whitespacesAndNewlines) == command {
+                    commandIDs.insert(message.id)
+                }
+            }
+            // Progress messages may be edited, and the final audio may reply to
+            // that progress message rather than directly to the /music command.
+            var unavailableMessage: String?
+            for message in history.sorted(by: { $0.id < $1.id }) where !message.isOutgoing && !baselineIDs.contains(message.id) {
+                var replyID: Int64?
+                if case let .messageReplyToMessage(reply) = message.replyTo,
+                   reply.chatId == 0 || reply.chatId == bot.peerID { replyID = reply.messageId }
+                let belongsToRequest = matcher.isRelated(messageID: message.id, replyID: replyID, commandIDs: commandIDs)
+                if belongsToRequest {
+                    let text = TelegramMapping.text(from: message)
+                    if !text.isEmpty { lastReply = String(text.prefix(300)) }
+                    if let reason = matcher.unavailableMessage(in: text, isRelated: belongsToRequest) {
+                        unavailableMessage = String(reason.prefix(300))
+                    }
+                }
+                guard let track = TelegramMapping.track(from: message) else { continue }
+                if matcher.accepts(track, isRelated: belongsToRequest, replyID: replyID) {
+                    completed = true
+                    return track
+                }
+            }
+            if let unavailableMessage {
+                // A definitive negative reply completes the bot's job. It must
+                // release the gate without imposing the timeout retry delay.
+                completed = true
+                throw ImportedMusicError.unavailable(unavailableMessage)
+            }
+        }
+        throw ServiceError.telegram(lastReply.isEmpty
+            ? "The music bot did not return a matching audio file within two minutes. You can retry or open the bot conversation."
+            : "The music bot did not return a matching audio file. \(lastReply)")
     }
 
     func searchBotChat(_ config: SearchBotConfig) async throws -> MusicChat {

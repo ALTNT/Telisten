@@ -147,6 +147,15 @@
 		A8303775B6AD458E9B0A17D6 /* TelegramProxySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5E8A550542D4878B928949D /* TelegramProxySettingsView.swift */; };
 		04700D852463480EBB956A5A /* TelegramProxySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5E8A550542D4878B928949D /* TelegramProxySettingsView.swift */; };
 		81492252DBBA42789326E23B /* TelegramProxySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5E8A550542D4878B928949D /* TelegramProxySettingsView.swift */; };
+		812A8273413E9084F48E7D03 /* ImportedPlaylist.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2077D9682CE18FBC7C5C66DB /* ImportedPlaylist.swift */; };
+		50E004D679FD9446AF3350B2 /* ImportedPlaylist.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2077D9682CE18FBC7C5C66DB /* ImportedPlaylist.swift */; };
+		5C9BC5B36DBE1148BAF1993F /* ImportedPlaylist.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2077D9682CE18FBC7C5C66DB /* ImportedPlaylist.swift */; };
+		BAAE916F92EDF5E9CDA4239D /* ImportedPlaylistStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EDD150392376B8A049F1C4B /* ImportedPlaylistStore.swift */; };
+		82D5EEDE4A1533C67583FFE9 /* ImportedPlaylistStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EDD150392376B8A049F1C4B /* ImportedPlaylistStore.swift */; };
+		036E144EE1629C66AA2A9A3B /* ImportedPlaylistStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EDD150392376B8A049F1C4B /* ImportedPlaylistStore.swift */; };
+		F7BE53861D9F895341BCB954 /* ImportedPlaylistsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 680157E6AD0AA9EB8DA46AFF /* ImportedPlaylistsView.swift */; };
+		3F288074D46F49E0E2159A54 /* ImportedPlaylistsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 680157E6AD0AA9EB8DA46AFF /* ImportedPlaylistsView.swift */; };
+		0E743A29AB366A933FDBA7A2 /* ImportedPlaylistsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 680157E6AD0AA9EB8DA46AFF /* ImportedPlaylistsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -212,6 +221,9 @@
 		EF592DBE118E4B69B72E4893 /* TelegramProxyConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramProxyConfiguration.swift; sourceTree = "<group>"; };
 		F2339410409F491DB30DBB69 /* TelegramProxyController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramProxyController.swift; sourceTree = "<group>"; };
 		F5E8A550542D4878B928949D /* TelegramProxySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramProxySettingsView.swift; sourceTree = "<group>"; };
+		2077D9682CE18FBC7C5C66DB /* ImportedPlaylist.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportedPlaylist.swift; sourceTree = "<group>"; };
+		9EDD150392376B8A049F1C4B /* ImportedPlaylistStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportedPlaylistStore.swift; sourceTree = "<group>"; };
+		680157E6AD0AA9EB8DA46AFF /* ImportedPlaylistsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportedPlaylistsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -275,6 +287,7 @@
 		7165085D5C89935F74AE3CB3 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				680157E6AD0AA9EB8DA46AFF /* ImportedPlaylistsView.swift */,
 				F5E8A550542D4878B928949D /* TelegramProxySettingsView.swift */,
 				1A13083BFC30BBFC91565DEF /* VideoLibraryView.swift */,
 				E7B07A69B310BD8ADB95C699 /* BotSearchView.swift */,
@@ -318,6 +331,7 @@
 		7D7579E3BDFEC0239D9EEF56 /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				2077D9682CE18FBC7C5C66DB /* ImportedPlaylist.swift */,
 				EF592DBE118E4B69B72E4893 /* TelegramProxyConfiguration.swift */,
 				3B214D9DE7975166D4F2CF90 /* VideoModels.swift */,
 				A5E7173B5042D701CCD0BB3F /* AppConfiguration.swift */,
@@ -373,6 +387,7 @@
 		C1BEC674095514CB07A3DBB4 /* Storage */ = {
 			isa = PBXGroup;
 			children = (
+				9EDD150392376B8A049F1C4B /* ImportedPlaylistStore.swift */,
 				4E7178D6BBA83D68637B2955 /* ArtworkStore.swift */,
 				865CD00C4B2A6BB5461E1469 /* CacheStore.swift */,
 				7CBC653D37B65D391F853EFE /* ChatAvatarStore.swift */,
@@ -579,6 +594,7 @@
 				EC7C995D876673211AAFC98A /* ArtworkStore.swift in Sources */,
 				60C446DB44413362AD12F26B /* AudioPlayer.swift in Sources */,
 				906A0124FB893A0381F550A9 /* BotSearchView.swift in Sources */,
+				3F288074D46F49E0E2159A54 /* ImportedPlaylistsView.swift in Sources */,
 				D25122EBBBA2EBBD54BC141E /* CacheStore.swift in Sources */,
 				666833742419D91CF92F5C07 /* ChatAvatarStore.swift in Sources */,
 				ADE5F30F114D4267B8239321 /* Components.swift in Sources */,
@@ -592,9 +608,11 @@
 				080326E075FDB46AA123FA55 /* ListenTogetherContactPicker.swift in Sources */,
 				1E03353431C8D7EE47426E7D /* ListenTogetherView.swift in Sources */,
 				17A80FD38178138540F30E06 /* LocalLibraryStore.swift in Sources */,
+				BAAE916F92EDF5E9CDA4239D /* ImportedPlaylistStore.swift in Sources */,
 				E52A532A15FB89FF6339EC9F /* LoginView.swift in Sources */,
 				0454A092D39A0C796E147CDF /* LyricsService.swift in Sources */,
 				C1EDF29C62AB9979FF0207E5 /* Models.swift in Sources */,
+				812A8273413E9084F48E7D03 /* ImportedPlaylist.swift in Sources */,
 				F5FBAD1AD47AB85D7BA175E3 /* NowPlayingView.swift in Sources */,
 				3A29476A02CCF909B8EC64A7 /* PlayerBar.swift in Sources */,
 				1F0229A46090416F1BF80B20 /* PlaylistSheet.swift in Sources */,
@@ -624,6 +642,7 @@
 				77DC65110CE5515DF76946A4 /* ArtworkStore.swift in Sources */,
 				36687CC8CE4C5AEAD723C388 /* AudioPlayer.swift in Sources */,
 				1EC5955C2CBACC302B395E1A /* BotSearchView.swift in Sources */,
+				F7BE53861D9F895341BCB954 /* ImportedPlaylistsView.swift in Sources */,
 				E578FF963F220D117C2B7EF7 /* CacheStore.swift in Sources */,
 				90E4CB5309E78AB67870A553 /* ChatAvatarStore.swift in Sources */,
 				619BB27861E5214CD8EB4708 /* Components.swift in Sources */,
@@ -637,9 +656,11 @@
 				07BE48A0409B84BA0890B214 /* ListenTogetherContactPicker.swift in Sources */,
 				6D98ACC2C65AD1FB677D7A12 /* ListenTogetherView.swift in Sources */,
 				DC8CE769645170AB287FD31E /* LocalLibraryStore.swift in Sources */,
+				036E144EE1629C66AA2A9A3B /* ImportedPlaylistStore.swift in Sources */,
 				C785827E3E88AC034BBD193E /* LoginView.swift in Sources */,
 				B3586F938EC1C2591B81F3A3 /* LyricsService.swift in Sources */,
 				C8F83E416B089DCA714ECCD9 /* Models.swift in Sources */,
+				50E004D679FD9446AF3350B2 /* ImportedPlaylist.swift in Sources */,
 				E2CF4F1B8816CDE448E6EB60 /* NowPlayingView.swift in Sources */,
 				101547991F3AFCE033F7F908 /* PlayerBar.swift in Sources */,
 				C1E2325A63E4FF5B360853E0 /* PlaylistSheet.swift in Sources */,
@@ -669,6 +690,7 @@
 				9E334BA29740BB2D5E157CB6 /* ArtworkStore.swift in Sources */,
 				EF14D1E81C2B296FE89805FE /* AudioPlayer.swift in Sources */,
 				AC800FDB9CEC777265787BBA /* BotSearchView.swift in Sources */,
+				0E743A29AB366A933FDBA7A2 /* ImportedPlaylistsView.swift in Sources */,
 				8B55D4EEC0E6241E4C946311 /* CacheStore.swift in Sources */,
 				B5A553003C0ACA241CC2B122 /* ChatAvatarStore.swift in Sources */,
 				0A336508D105AFD202B24495 /* Components.swift in Sources */,
@@ -682,9 +704,11 @@
 				F868AB7962ABFC6B829DE9C7 /* ListenTogetherContactPicker.swift in Sources */,
 				FE3042380DD2359EC57DF008 /* ListenTogetherView.swift in Sources */,
 				5D39DB3997982E6690D756E9 /* LocalLibraryStore.swift in Sources */,
+				82D5EEDE4A1533C67583FFE9 /* ImportedPlaylistStore.swift in Sources */,
 				390AFF216D76065DE5928271 /* LoginView.swift in Sources */,
 				33FBFEB23C223FAA41A29551 /* LyricsService.swift in Sources */,
 				CF793513AAC64E44DCF6FEC8 /* Models.swift in Sources */,
+				5C9BC5B36DBE1148BAF1993F /* ImportedPlaylist.swift in Sources */,
 				98AC519455918D7BADDC8114 /* NowPlayingView.swift in Sources */,
 				0B288CDE9885C846CF935C15 /* PlayerBar.swift in Sources */,
 				BE4E8B2039D2EF7B585E0CE2 /* PlaylistSheet.swift in Sources */,

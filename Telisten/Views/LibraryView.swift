@@ -64,6 +64,7 @@ struct LibraryView: View {
     @ObservedObject var model: AppModel
     @AppStorage("video.enabled") private var videoEnabled = false
     @State private var showVideos = false
+    @State private var showImportedPlaylists = false
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     #if DEBUG
     @State private var showSettings = ProcessInfo.processInfo.arguments.contains("--demo-settings")
@@ -161,6 +162,9 @@ struct LibraryView: View {
                 if let track = model.playlistTrack {
                     PlaylistSheet(model: model, track: track)
                 }
+            }
+            .sheet(isPresented: $showImportedPlaylists) {
+                ImportedPlaylistsView(model: model).id(model.activeAccountID)
             }
             .sheet(item: $batchPlaylistSelection) { selection in
                 BatchPlaylistSheet(model: model, tracks: selection.tracks) { savedID in
@@ -355,6 +359,10 @@ struct LibraryView: View {
                     .tag(SidebarSelection.favorites)
                 Label("Downloads", systemImage: "arrow.down.circle.fill")
                     .tag(SidebarSelection.downloads)
+                Button { showImportedPlaylists = true } label: {
+                    Label("Imported playlists", systemImage: "square.and.arrow.down")
+                }
+                .buttonStyle(.plain)
                 if videoEnabled {
                     Button { showVideos = true } label: {
                         Label("Videos", systemImage: "play.rectangle.fill")

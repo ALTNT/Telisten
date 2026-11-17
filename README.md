@@ -13,6 +13,16 @@ A native Telegram music player for iOS, macOS, visionOS, and Android. Play music
 
 Telegram permissions still apply. Secret chats are not supported. Listen Together is experimental.
 
+## Imported music playlists (Apple)
+
+Open **Library → Imported playlists**, paste a public NetEase Cloud Music or QQ Music playlist link (or its share text), and choose **Read playlist** to preview and save the song list. NetEase short links are supported. The preview shows the number of songs read against the platform's total; incomplete responses are labeled. Importing the same playlist updates its local snapshot and preserves existing audio associations. Snapshots are stored on this device, separately for each Telegram account.
+
+Choose a configured MusicBot that supports `/music <song link>`. Playing an unresolved song requests that one track from the bot, then uses the normal Telegram streaming and cache path. Imports do not request audio in bulk. The bot's default quality applies. Next/previous, playback modes and the player queue follow the imported list during playback. Bot requests wait up to two minutes. If the bot confirms that a song is unavailable, waiting ends immediately and that entry is marked for explicit retry; other songs remain playable. Requests without a definitive response, including timeouts and cancellations, have a one-minute retry delay because the bot may still be processing them. Mobile background execution can limit requests for unresolved songs after locking the device.
+
+Use a song's context menu to **Choose received audio** if automatic matching cannot confirm a bot response, or **Forget matched audio** to replace an unavailable source. Matched audio is distinct from downloaded audio; only downloaded files are available offline. Platform login and automatic source-playlist synchronization are not included.
+
+Run `bash Scripts/test-imported-playlists.sh` for importer, matching and storage tests. Add `--live` to check the two public example playlists over the network; this reads metadata only and sends no Telegram messages.
+
 ## Build
 
 Both apps live here: `Telisten/` contains the SwiftUI iOS/macOS/visionOS app; [`android/`](android/README.md) contains the Kotlin/Compose Android app. Apple uses TDLibKit; Android uses TDLib and Media3.
