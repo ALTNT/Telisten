@@ -35,6 +35,21 @@ enum VideoTests {
         precondition(secondExport != exportedLogs, "Share snapshots must not overwrite one another")
         log("PASS: diagnostic snapshot includes queued events, version header and unique export files")
 
+        let videoPage = VideoPage(items: [item(100), item(90), item(80)], nextOffset: 80)
+        let documentPage = VideoPage(items: [item(90), item(85)], nextOffset: 85)
+        let merged = VideoPageMerge.merge([videoPage, documentPage])
+        precondition(merged.nextOffset == 85)
+        precondition(merged.items.map(\.messageID) == [100, 90, 85])
+        let partialFirstPage = VideoPageMerge.merge([videoPage], retryOffset: 0)
+        precondition(partialFirstPage.nextOffset == 0)
+        precondition(partialFirstPage.items.map(\.messageID) == [100, 90, 80])
+        let partialLaterPage = VideoPageMerge.merge([videoPage], retryOffset: 120)
+        precondition(partialLaterPage.nextOffset == 120)
+        precondition(partialLaterPage.items.count == 3)
+        let unrelatedDocuments = VideoPageMerge.merge([VideoPage(items: [], nextOffset: 70)])
+        precondition(unrelatedDocuments.items.isEmpty && unrelatedDocuments.nextOffset == 70)
+        log("PASS: partial video pages retain results and retry cursors; merged pages deduplicate without skipping")
+
         let immediate = try await VideoListRequest<Int>.run { completion in
             completion(.success(42))
             completion(.success(99))

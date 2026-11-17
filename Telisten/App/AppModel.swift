@@ -145,6 +145,8 @@ final class AppModel: ObservableObject {
     private var qrCodeLoginOperationID: UUID?
     private var passwordRequestedByQRCode = false
     private var postLoginRefreshTask: Task<Void, Never>?
+    private var foregroundReconnectTask: Task<Void, Never>?
+    private var backgroundedAt: Date?
     private var listenTogetherTask: Task<Void, Never>?
     private var broadcastTrackID: String?
     private var broadcastStartedAt: Date?
@@ -1725,16 +1727,40 @@ final class AppModel: ObservableObject {
     }
 
     func applicationDidEnterBackground() {
+        backgroundedAt = Date()
+        foregroundReconnectTask?.cancel()
+        PlaybackDiagnostics.log("application_background")
         pendingDownloadResumeIDs.formUnion(downloadTasks.keys)
         persistPendingDownloadResumeIDs()
     }
 
     func applicationDidBecomeActive() async {
+        let backgroundDuration = backgroundedAt.map { Date().timeIntervalSince($0) }
+        backgroundedAt = nil
+        if let backgroundDuration {
+            PlaybackDiagnostics.log("application_foreground backgroundSeconds=\(backgroundDuration)")
+        }
         await proxyController.refresh()
-        guard phase == .ready,
-              hasCredentials,
+        guard hasCredentials,
               await telegram.hasAuthorizedSession() else { return }
 
+        if let backgroundDuration, backgroundDuration >= 30, !isAddingAccount {
+            let expectedAccountID = activeAccountID
+            foregroundReconnectTask = Task { [weak self] in
+                guard let self else { return }
+                do {
+                    try Task.checkCancellation()
+                    try await self.telegram.recoverConnectionAfterStandby()
+                } catch is CancellationError {
+                    PlaybackDiagnostics.log("telegram_foreground_reconnect_cancelled")
+                } catch {
+                    PlaybackDiagnostics.log("telegram_foreground_reconnect_failed", error: error)
+                }
+            }
+            await foregroundReconnectTask?.value
+            guard backgroundedAt == nil, activeAccountID == expectedAccountID else { return }
+        }
+        guard phase == .ready else { return }
         for trackID in pendingDownloadResumeIDs.sorted() {
             if cachedIDs.contains(trackID) {
                 clearPendingDownloadResumeID(trackID)
@@ -2590,6 +2616,8 @@ final class AppModel: ObservableObject {
         playbackTask = nil
         postLoginRefreshTask?.cancel()
         postLoginRefreshTask = nil
+        foregroundReconnectTask?.cancel()
+        foregroundReconnectTask = nil
         musicChatIndexTask?.cancel()
         listenTogetherTask?.cancel()
         listenTogetherTask = nil

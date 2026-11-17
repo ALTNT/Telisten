@@ -167,6 +167,22 @@ struct VideoPage: Sendable {
     var nextOffset: Int64?
 }
 
+enum VideoPageMerge {
+    static func merge(_ pages: [VideoPage], retryOffset: Int64? = nil) -> VideoPage {
+        let next = retryOffset ?? pages.compactMap(\.nextOffset).max()
+        // A partial page must retry the same cursor to avoid skipping documents
+        // that were not returned. Its already-loaded videos remain visible.
+        let boundary = retryOffset == nil ? (next ?? Int64.min) : Int64.min
+        var seen: Set<String> = []
+        return VideoPage(
+            items: pages.flatMap(\.items)
+                .filter { $0.messageID >= boundary && seen.insert($0.id).inserted }
+                .sorted { $0.messageID > $1.messageID },
+            nextOffset: next
+        )
+    }
+}
+
 /// Keep the original for matching, but page using the resolved discussion's
 /// chat and root message so all cursor IDs belong to the same chat.
 struct VideoCommentLookup {

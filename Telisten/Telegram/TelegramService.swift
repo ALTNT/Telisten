@@ -144,6 +144,8 @@ actor TelegramService {
     private var searchBotPeers: [String: MusicChat] = [:]
     private var lyricsAttachmentCache: [String: [TelegramLyricsAttachment]] = [:]
     private var replacingSession = false
+    private var reconnectingClient = false
+    private var closingClientID: Int32?
     private var desiredProxy: SOCKS5ProxyConfiguration?
     private var appliedProxy: SOCKS5ProxyConfiguration?
     private var proxyClientReady = false
@@ -154,7 +156,7 @@ actor TelegramService {
         desiredProxy = proxy
         // Network polling must not reopen a database while a reauthorized
         // session is being moved into place.
-        guard !replacingSession else { return }
+        guard !replacingSession, !reconnectingClient, closingClientID == nil else { return }
         // Saving a proxy must also recover a client that was never initialized
         // or was closed after a failed startup, rather than only updating UI.
         if client == nil, credentials != nil {
@@ -170,7 +172,8 @@ actor TelegramService {
         // older Wi-Fi update cannot finish after a newer mobile-data update.
         let task = Task {
             _ = try? await previous?.value
-            guard let client = self.client, self.proxyClientReady, !self.replacingSession else {
+            guard let client = self.client, self.proxyClientReady, !self.replacingSession,
+                  !self.reconnectingClient, self.closingClientID == nil else {
                 PlaybackDiagnostics.log("telegram_proxy_deferred clientAvailable=\(self.client != nil) clientReady=\(self.proxyClientReady)")
                 return
             }
@@ -210,6 +213,33 @@ actor TelegramService {
         } catch {
             PlaybackDiagnostics.log("telegram_proxy_apply_failed", error: error)
             throw error
+        }
+    }
+
+    func testConnectionProxy(_ proxy: SOCKS5ProxyConfiguration) async throws {
+        guard proxy.isValid, let port = Int(proxy.normalized.port) else {
+            throw ServiceError.telegram("Invalid SOCKS5 proxy settings.")
+        }
+        do {
+            let client = try await requireClient()
+            let selected = Proxy(port: port, server: proxy.normalized.server, type: .proxyTypeSocks5(
+                ProxyTypeSocks5(password: proxy.password, username: proxy.username)
+            ))
+            // Let TDLib choose its latency probe target instead of forcing DC2.
+            // Bound the callback: one slow probe must not hang the settings UI.
+            let seconds = try await VideoListRequest<Double>.run(timeout: .seconds(30)) { completion in
+                try client.pingProxy(proxy: selected) { result in
+                    completion(result.map { $0.seconds })
+                }
+            }
+            PlaybackDiagnostics.log("telegram_proxy_test_complete method=pingProxy seconds=\(seconds)")
+        } catch {
+            let readable = readableLoginError(error)
+            PlaybackDiagnostics.log("telegram_proxy_test_failed method=pingProxy timeout=30", error: readable)
+            if (error as? URLError)?.code == .timedOut {
+                throw ServiceError.telegram("Telegram did not answer the latency probe within 30 seconds. Some account requests may still work.")
+            }
+            throw readable
         }
     }
 
@@ -883,8 +913,8 @@ actor TelegramService {
             let client = try await requireReadyClient()
             try Task.checkCancellation()
             PlaybackDiagnostics.log("video_list_client_ready request=\(requestID) client=\(client.id) connection=\(connectionState)")
-            var items: [VideoItem] = []
-            var offsets: [Int64] = []
+            var pages: [VideoPage] = []
+            var isPartial = false
             // Include videos sent as documents. Advance using raw message IDs even
             // when a page contains only unrelated documents.
             for filter in [SearchMessagesFilter.searchMessagesFilterVideo, .searchMessagesFilterDocument] {
@@ -894,32 +924,34 @@ actor TelegramService {
                 PlaybackDiagnostics.log("video_list_search_start request=\(requestID) filter=\(filterName) connection=\(connectionState) timeout=30")
                 // Do not race TDLib's async wrapper in a task group: its
                 // continuation ignores cancellation, so the group could hang.
-                let page = try await VideoListRequest<VideoPage>.run { completion in
-                    try client.searchChatMessages(
-                        chatId: chatID, filter: filter, fromMessageId: offsetID,
-                        limit: 30, offset: 0, query: query, senderId: nil, topicId: nil
-                    ) { result in
-                        completion(result.map { result in
-                            let messages = result.messages.filter { offsetID == 0 || $0.id < offsetID }
-                            return VideoPage(items: messages.compactMap(TelegramMapping.video(from:)), nextOffset: messages.map(\.id).min())
-                        })
-                        PlaybackDiagnostics.log("video_list_search_callback request=\(requestID) filter=\(filterName) elapsed=\(Foundation.Date().timeIntervalSince(searchStarted))")
+                do {
+                    let page = try await VideoListRequest<VideoPage>.run { completion in
+                        try client.searchChatMessages(
+                            chatId: chatID, filter: filter, fromMessageId: offsetID,
+                            limit: 30, offset: 0, query: query, senderId: nil, topicId: nil
+                        ) { result in
+                            completion(result.map { result in
+                                let messages = result.messages.filter { offsetID == 0 || $0.id < offsetID }
+                                return VideoPage(items: messages.compactMap(TelegramMapping.video(from:)), nextOffset: messages.map(\.id).min())
+                            })
+                            PlaybackDiagnostics.log("video_list_search_callback request=\(requestID) filter=\(filterName) elapsed=\(Foundation.Date().timeIntervalSince(searchStarted))")
+                        }
                     }
+                    try Task.checkCancellation()
+                    PlaybackDiagnostics.log("video_list_search_complete request=\(requestID) filter=\(filterName) count=\(page.items.count) elapsed=\(Foundation.Date().timeIntervalSince(searchStarted))")
+                    pages.append(page)
+                } catch {
+                    try Task.checkCancellation()
+                    guard (error as? URLError)?.code == .timedOut,
+                          pages.contains(where: { !$0.items.isEmpty }) else { throw error }
+                    // A supplementary filter timing out must not discard the
+                    // videos already loaded successfully by the first filter.
+                    isPartial = true
+                    PlaybackDiagnostics.log("video_list_partial request=\(requestID) filter=\(filterName) retryOffset=\(offsetID)", error: error)
                 }
-                try Task.checkCancellation()
-                PlaybackDiagnostics.log("video_list_search_complete request=\(requestID) filter=\(filterName) count=\(page.items.count) elapsed=\(Foundation.Date().timeIntervalSince(searchStarted))")
-                items.append(contentsOf: page.items)
-                if let last = page.nextOffset { offsets.append(last) }
             }
-            // The newer boundary avoids skipping results from either filter.
-            let next = offsets.max()
-            var seen: Set<String> = []
-            let boundary = next ?? Int64.min
-            let page = VideoPage(
-                items: items.filter { $0.messageID >= boundary && seen.insert($0.id).inserted }
-                    .sorted { $0.messageID > $1.messageID },
-                nextOffset: next
-            )
+            let page = VideoPageMerge.merge(pages, retryOffset: isPartial ? offsetID : nil)
+            let next = page.nextOffset
             PlaybackDiagnostics.log("video_list_complete request=\(requestID) count=\(page.items.count) nextOffset=\(next ?? 0)")
             return page
         } catch {
@@ -1551,7 +1583,7 @@ actor TelegramService {
     }
 
     private func requireClient() async throws -> TDLibClient {
-        guard !replacingSession else { throw ServiceError.noConnection }
+        guard !replacingSession, !reconnectingClient, closingClientID == nil else { throw ServiceError.noConnection }
         if let client { return client }
         guard let credentials else { throw ServiceError.notConfigured }
         let directory = storageURL(for: accountID)
@@ -1579,16 +1611,19 @@ actor TelegramService {
         } catch {
             throw ServiceError.sessionPersistenceFailed
         }
+        let initializationAccountID = accountID
         let manager = self.manager ?? TDLibClientManager()
         self.manager = manager
-        let created = manager.createClient(updateHandler: { [weak self] data, _ in
-            Task.detached { [weak self, data] in await self?.receiveUpdate(data) }
+        let created = manager.createClient(updateHandler: { [weak self] data, sourceClient in
+            let sourceID = sourceClient.id
+            Task.detached { [weak self, data] in await self?.receiveClientUpdate(data, from: sourceID) }
         })
         proxyClientReady = false
         client = created
         var initializationStage = "getAuthorizationState"
         do {
             var state = try await created.getAuthorizationState()
+            guard client?.id == created.id, accountID == initializationAccountID else { throw CancellationError() }
             if case .authorizationStateWaitTdlibParameters = state {
                 #if os(iOS)
                 let deviceModel = "iPhone"
@@ -1617,17 +1652,25 @@ actor TelegramService {
                 initializationStage = "getAuthorizationStateAfterParameters"
                 state = try await created.getAuthorizationState()
             }
+            guard client?.id == created.id, accountID == initializationAccountID else { throw CancellationError() }
             // TDLib needs its database parameters before proxy configuration;
             // apply before issuing any login or media request.
             proxyClientReady = true
             initializationStage = "applyConnectionProxy"
             try await setConnectionProxy(desiredProxy)
+            guard client?.id == created.id, accountID == initializationAccountID else { throw CancellationError() }
             authorizationState = state
             if case .authorizationStateReady = state {
                 _ = keychain.setTDLibAccount(accountID, authorized: true)
             }
             return created
         } catch {
+            // An account change may close this client while initialization is
+            // awaiting TDLib. Never clear the new account's client in that case.
+            guard client?.id == created.id, accountID == initializationAccountID else {
+                PlaybackDiagnostics.log("telegram_client_initialization_cancelled reason=clientChanged")
+                throw CancellationError()
+            }
             // TDLibKit.Error does not implement LocalizedError; bridging it to
             // NSError loses both its real code and message. Preserve them here.
             let tdlibCode = (error as? TDLibKit.Error).map { String($0.code) } ?? "none"
@@ -1643,6 +1686,7 @@ actor TelegramService {
     private func requireReadyClient() async throws -> TDLibClient {
         let client = try await requireClient()
         let state = try await client.getAuthorizationState()
+        guard self.client?.id == client.id else { throw CancellationError() }
         authorizationState = state
         guard case .authorizationStateReady = state else { throw ServiceError.noConnection }
         return client
@@ -1700,6 +1744,70 @@ actor TelegramService {
             throw ServiceError.sessionPersistenceFailed
         }
         return account
+    }
+
+    func recoverConnectionAfterStandby() async throws {
+        guard !replacingSession, !reconnectingClient, closingClientID == nil,
+              proxyClientReady, let previousClient = client,
+              case .authorizationStateReady? = authorizationState,
+              ["connectionStateConnecting", "connectionStateConnectingToProxy"].contains(connectionState) else { return }
+        let expectedAccountID = accountID
+        let expectedClientID = previousClient.id
+        PlaybackDiagnostics.log("telegram_foreground_reconnect_grace client=\(expectedClientID) state=\(connectionState)")
+        try await Task.sleep(for: .seconds(5))
+        // TDLib may have recovered while we waited, or the user may have changed
+        // accounts. Never disrupt a healthy/updating connection or a new client.
+        guard !replacingSession, !reconnectingClient, closingClientID == nil,
+              accountID == expectedAccountID, client?.id == expectedClientID,
+              ["connectionStateConnecting", "connectionStateConnectingToProxy"].contains(connectionState) else { return }
+        reconnectingClient = true
+        defer { reconnectingClient = false }
+        closingClientID = expectedClientID
+        client = nil
+        proxyClientReady = false
+        connectionState = "connectionStateConnecting"
+        PlaybackDiagnostics.log("telegram_foreground_reconnect_start client=\(expectedClientID)")
+        // A close result acknowledges the request, not the end of database use.
+        // Keep media session handles: the reopened client uses the same database.
+        do {
+            _ = try await VideoListRequest<Void>.run(timeout: .seconds(5)) { completion in
+                try previousClient.close { result in completion(result.map { _ in () }) }
+            }
+        } catch {
+            PlaybackDiagnostics.log("telegram_foreground_close_request_failed", error: readableLoginError(error))
+        }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while closingClientID == expectedClientID, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        guard closingClientID == nil else {
+            // Keep initialization gated until a late Closed update arrives.
+            // Opening the same database while it is closing risks a file lock.
+            PlaybackDiagnostics.log("telegram_foreground_reconnect_deferred reason=closeTimeout")
+            throw ServiceError.noConnection
+        }
+        try Task.checkCancellation()
+        guard accountID == expectedAccountID, !replacingSession, client == nil else { return }
+        reconnectingClient = false
+        let reopened = try await requireReadyClient()
+        PlaybackDiagnostics.log("telegram_foreground_reconnect_reopened client=\(reopened.id) state=\(connectionState)")
+    }
+
+    private func receiveClientUpdate(_ data: Data, from sourceID: Int32) {
+        guard client?.id == sourceID else {
+            // The old client remains capable of delivering queued callbacks.
+            // Only its final Closed acknowledgement belongs to the recovery.
+            if closingClientID == sourceID,
+               let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+               object["@type"] as? String == "updateAuthorizationState",
+               let state = object["authorization_state"] as? [String: Any],
+               state["@type"] as? String == "authorizationStateClosed" {
+                closingClientID = nil
+                PlaybackDiagnostics.log("telegram_foreground_client_closed client=\(sourceID)")
+            }
+            return
+        }
+        receiveUpdate(data)
     }
 
     // Read TDLib's actual state without starting another connection or request.

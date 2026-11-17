@@ -358,12 +358,16 @@ private struct VideoChannelView: View {
         errorMessage = nil
         PlaybackDiagnostics.log("video_channel_load_start request=\(requestID) chat=\(chat.peerID) reset=\(reset)")
         do {
-            let page = try await service.videos(in: chat.peerID, offsetID: reset ? 0 : nextOffset ?? 0, query: query)
+            let requestedOffset = reset ? 0 : nextOffset ?? 0
+            let page = try await service.videos(in: chat.peerID, offsetID: requestedOffset, query: query)
             try Task.checkCancellation()
             guard generation == requestID else { return }
             var seen = Set(items.map(\.id))
             items.append(contentsOf: page.items.filter { seen.insert($0.id).inserted })
             nextOffset = page.nextOffset
+            if page.nextOffset == requestedOffset {
+                errorMessage = localizedUI("Some videos loaded, but the document search timed out. Retry to load the remaining videos.")
+            }
             PlaybackDiagnostics.log("video_channel_load_complete request=\(requestID) count=\(items.count)")
         } catch is CancellationError {
             PlaybackDiagnostics.log("video_channel_load_cancelled request=\(requestID)")

@@ -17,6 +17,14 @@ struct TelegramProxySettingsView: View {
                         Text("Automatic by Wi-Fi").tag(TelegramProxyConfiguration.Mode.automatic)
                     }
                     LabeledContent("Applied connection", value: controller.status)
+                    Button("Test saved proxy") {
+                        Task { await controller.testSavedProxy() }
+                    }
+                    .disabled(controller.isTestingProxy)
+                    if controller.isTestingProxy { ProgressView() }
+                    if let result = controller.proxyTestResult {
+                        Text(result).font(.caption).foregroundStyle(.secondary)
+                    }
                     Text("Direct connections follow system routing, including an enabled VPN. Telisten does not turn the system VPN on or off.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -28,7 +36,7 @@ struct TelegramProxySettingsView: View {
                         if let message = controller.wifiDetectionMessage {
                             Text(message).font(.caption).foregroundStyle(.secondary)
                         }
-                        Text("Allow precise location to read the Wi-Fi name. If the name is unavailable, the other networks setting applies.")
+                        Text("Allow precise location to read the Wi-Fi name. Temporary read failures keep the last verified Wi-Fi rule; unidentified networks use the other networks setting.")
                             .font(.caption).foregroundStyle(.secondary)
                         #else
                         Text("Wi-Fi name detection is available on iPhone and iPad. Use a fixed proxy or the other networks setting on this device.")
@@ -88,7 +96,7 @@ struct TelegramProxySettingsView: View {
                     Text("Proxy settings and credentials are stored in this device’s Keychain. Changes apply to Telegram login, messages, and media transfers.")
                 }
             }
-            .disabled(isSaving)
+            .disabled(isSaving || controller.isTestingProxy)
             .navigationTitle("Telegram proxy")
             .onChange(of: controller.currentSSID) { ssid in
                 guard let ssid, let id = pendingWiFiRuleID else { return }

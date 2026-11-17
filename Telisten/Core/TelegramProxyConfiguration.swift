@@ -63,3 +63,19 @@ struct TelegramProxyConfiguration: Codable, Equatable, Sendable {
         }
     }
 }
+
+struct WiFiProxyNetworkState {
+    private(set) var ssid: String?
+
+    mutating func update(isWiFi: Bool, ssid: String?, canReadSSID: Bool) -> String? {
+        if let ssid {
+            self.ssid = ssid
+        } else if !isWiFi || !canReadSSID {
+            self.ssid = nil
+        }
+        // A nil read while Wi-Fi is still available is not proof of leaving
+        // the matched network. Retain the last verified name until evidence
+        // of another network, a non-Wi-Fi path, or a permission change arrives.
+        return self.ssid
+    }
+}

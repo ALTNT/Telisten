@@ -39,6 +39,27 @@ enum TelegramProxyTests {
         precondition(SOCKS5ProxyConfiguration(server: " ::1 ", port: " 1080 ").isValid)
         precondition(SOCKS5ProxyConfiguration(server: "localhost", port: "65535").isValid)
         precondition(!SOCKS5ProxyConfiguration(server: "localhost", username: String(repeating: "x", count: 256)).isValid)
-        print("Telegram proxy rules and validation passed")
+        var network = WiFiProxyNetworkState()
+        var stableSettings = TelegramProxyConfiguration()
+        stableSettings.mode = .automatic
+        stableSettings.wifiRules = [WiFiProxyRule(ssid: "Home", proxy: lan)]
+        precondition(network.update(isWiFi: true, ssid: nil, canReadSSID: true) == nil)
+        precondition(network.update(isWiFi: true, ssid: "Home", canReadSSID: true) == "Home")
+        for _ in 0..<100 {
+            let name = network.update(isWiFi: true, ssid: nil, canReadSSID: true)
+            precondition(stableSettings.selectedProxy(isWiFi: true, ssid: name) == lan)
+        }
+        let cafe = network.update(isWiFi: true, ssid: "Cafe", canReadSSID: true)
+        precondition(stableSettings.selectedProxy(isWiFi: true, ssid: cafe) == nil)
+        precondition(network.update(isWiFi: true, ssid: nil, canReadSSID: true) == "Cafe")
+        _ = network.update(isWiFi: true, ssid: "Home", canReadSSID: true)
+        precondition(network.update(isWiFi: false, ssid: nil, canReadSSID: true) == nil)
+        precondition(network.update(isWiFi: true, ssid: nil, canReadSSID: true) == nil)
+        _ = network.update(isWiFi: true, ssid: "Home", canReadSSID: true)
+        precondition(network.update(isWiFi: true, ssid: nil, canReadSSID: false) == nil)
+        precondition(network.update(isWiFi: true, ssid: nil, canReadSSID: true) == nil)
+        // A real SSID read is stronger evidence than a VPN's default path type.
+        precondition(network.update(isWiFi: false, ssid: "Home", canReadSSID: true) == "Home")
+        print("Telegram proxy rules, validation, and transient SSID handling passed")
     }
 }
