@@ -21,6 +21,22 @@ private final class PlaylistFixtureProtocol: URLProtocol, @unchecked Sendable {
 @main
 enum ImportedPlaylistTests {
     static func main() async throws {
+        let start = Date(timeIntervalSince1970: 1_000)
+        var suspended = ImportedMusicWaitBudget(now: start, isForeground: true)
+        suspended.setForeground(false, now: start.addingTimeInterval(20))
+        precondition(!suspended.hasExpired(now: start.addingTimeInterval(285)),
+                     "The reported four-minute background interval must not exhaust a two-minute foreground budget")
+        suspended.setForeground(true, now: start.addingTimeInterval(285))
+        precondition(!suspended.hasExpired(now: start.addingTimeInterval(384)))
+        precondition(suspended.hasExpired(now: start.addingTimeInterval(385)))
+        var active = ImportedMusicWaitBudget(now: start, isForeground: true)
+        active.setForeground(true, now: start.addingTimeInterval(60))
+        precondition(active.hasExpired(now: start.addingTimeInterval(121)), "Repeated foreground callbacks must not restart the timeout")
+        var ceiling = ImportedMusicWaitBudget(now: start, isForeground: false)
+        precondition(ceiling.hasExpired(now: start.addingTimeInterval(901)), "Uninterrupted background polling must remain bounded")
+        ceiling.setForeground(true, now: start.addingTimeInterval(1_000))
+        precondition(!ceiling.hasExpired(now: start.addingTimeInterval(1_014)))
+        precondition(ceiling.hasExpired(now: start.addingTimeInterval(1_015)), "A long suspension gets a bounded final recovery window")
         if CommandLine.arguments.contains("--live") {
             for url in ["https://163cn.tv/blcb4v85", "https://y.qq.com/n/ryqq_v2/playlist/8715593947"] {
                 let playlist = try await PlaylistImportService().preview(url)

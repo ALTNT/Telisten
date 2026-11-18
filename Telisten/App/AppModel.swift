@@ -1924,6 +1924,7 @@ final class AppModel: ObservableObject {
 
     func applicationDidEnterBackground() {
         backgroundedAt = Date()
+        Task { await telegram.setImportedMusicForeground(false) }
         foregroundReconnectTask?.cancel()
         PlaybackDiagnostics.log("application_background")
         pendingDownloadResumeIDs.formUnion(downloadTasks.keys)
@@ -1931,6 +1932,7 @@ final class AppModel: ObservableObject {
     }
 
     func applicationDidBecomeActive() async {
+        await telegram.setImportedMusicForeground(true)
         let backgroundDuration = backgroundedAt.map { Date().timeIntervalSince($0) }
         backgroundedAt = nil
         if let backgroundDuration {

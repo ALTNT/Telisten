@@ -29224,6 +29224,58 @@
           }
         }
       }
+    },
+    "Timed out waiting for the music bot's audio file. You can retry or choose received audio.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Timed out waiting for the music bot's audio file. You can retry or choose received audio."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待音乐机器人返回音频超时。可以重试，或选择已收到的音频。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待音樂機器人傳回音訊逾時。可以重試，或選擇已收到的音訊。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "音楽ボットからの音声を待機中にタイムアウトしました。再試行するか、受信済みの音声を選択してください。"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Đã hết thời gian chờ âm thanh từ bot. Bạn có thể thử lại hoặc chọn âm thanh đã nhận."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le délai d’attente du fichier audio du bot est dépassé. Réessayez ou choisissez un fichier audio reçu."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se agotó el tiempo de espera del audio del bot. Puedes reintentarlo o elegir audio recibido."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "음악 봇의 오디오를 기다리는 시간이 초과되었습니다. 다시 시도하거나 수신한 오디오를 선택하세요."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

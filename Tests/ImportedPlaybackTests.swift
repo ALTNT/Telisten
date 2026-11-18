@@ -3,6 +3,9 @@ import Foundation
 private enum UserFacingError {
     static func message(for error: Error) -> String { error.localizedDescription }
 }
+private enum PlaybackDiagnostics {
+    static func log(_ event: String, error: Error? = nil) {}
+}
 
 // Minimal transport fakes exercise the actual production polling method without
 // sending Telegram messages or waiting for its two-minute timeout.
@@ -25,6 +28,9 @@ private struct ImportedTestReply: Sendable {
 private enum ImportedTestReplyTo: Sendable {
     case messageReplyToMessage(ImportedTestReply)
 }
+private struct ImportedTestDocument: Sendable { var mimeType = "audio/flac" }
+private struct ImportedTestMessageDocument: Sendable { var document = ImportedTestDocument() }
+private enum ImportedTestContent: Sendable { case other; case messageDocument(ImportedTestMessageDocument) }
 private struct ImportedTestMessage: Sendable {
     var id: Int64
     var isOutgoing = false
@@ -32,6 +38,7 @@ private struct ImportedTestMessage: Sendable {
     var replyTo: ImportedTestReplyTo? = nil
     var text = ""
     var track: Track? = nil
+    var content = ImportedTestContent.other
 }
 private enum TelegramMapping {
     static func text(from message: ImportedTestMessage) -> String { message.text }
@@ -40,9 +47,11 @@ private enum TelegramMapping {
 private actor ImportedTestClient {
     var messages: [ImportedTestMessage] = []
     var requestCount = 0
+    var returnAudioImmediately = false
     let track: Track
     init(track: Track) { self.track = track }
     func history() -> [ImportedTestMessage] { messages }
+    func useImmediateAudio() { returnAudioImmediately = true }
     func sendMessage(chatId: Int64, inputMessageContent: ImportedTestInputContent,
                      options: Int?, replyMarkup: Int?, replyTo: Int?, topicId: Int?) throws -> ImportedTestMessage {
         requestCount += 1
@@ -52,7 +61,7 @@ private actor ImportedTestClient {
         case let .inputMessageText(content): command = ImportedTestMessage(id: commandID, isOutgoing: true, text: content.text.text)
         }
         messages.append(command)
-        if requestCount == 1 {
+        if requestCount == 1 && !returnAudioImmediately {
             let progressID = commandID + 1
             messages.append(ImportedTestMessage(id: progressID,
                 replyTo: .messageReplyToMessage(ImportedTestReply(chatId: chatId, messageId: commandID)), text: "Downloading…"))
@@ -74,9 +83,14 @@ private actor ImportedResolverHarness {
     enum ServiceError: Error { case telegram(String) }
     var accountID = "one"
     var isResolvingImportedMusic = false
+    var importedMusicIsForeground = true
+    var importedMusicWaitBudget: ImportedMusicWaitBudget?
     var importedMusicRetryAfter: [String: Date] = [:]
     let client: ImportedTestClient
     init(track: Track) { client = ImportedTestClient(track: track) }
+    func expireWaitForTest() -> Bool {
+        importedMusicWaitBudget?.hasExpired(now: Date().addingTimeInterval(121)) ?? false
+    }
     func resolveSearchBot(_ config: SearchBotConfig) async throws -> MusicChat {
         MusicChat(id: "u:1", peerID: 1, accessHash: nil, kind: .user, title: "Bot", username: config.botName)
     }
@@ -259,6 +273,14 @@ private enum ImportedPlaybackTests {
                      "A definitive failure must release the gate without a timeout cooldown")
         let resolved = try await resolver.resolveImportedMusic(secondEntry, using: config)
         precondition(resolved == track, "The next request must succeed despite a late unavailable reply for the old command")
+        let finalPoll = ImportedResolverHarness(track: track)
+        await finalPoll.client.useImmediateAudio()
+        let late = Task { try await finalPoll.resolveImportedMusic(entry, using: config) }
+        try await Task.sleep(for: .milliseconds(100))
+        let expired = await finalPoll.expireWaitForTest()
+        precondition(expired)
+        let recovered = try await late.value
+        precondition(recovered == track, "An elapsed budget must not skip the final history check for an already-delivered file")
         let restoredModel = ImportedPlaybackHarness(directory: directory.appendingPathComponent("restored"), track: track)
         try restoredModel.importedPlaylistSyncState.merge(unavailableModel.importedPlaylistSyncState.pendingUploadRecords)
         restoredModel.importedPlaylists = restoredModel.importedPlaylistSyncState.playlists(preservingLocalTracks: [])

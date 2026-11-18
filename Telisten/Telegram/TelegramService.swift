@@ -143,6 +143,8 @@ actor TelegramService {
     private var loginTokenUpdateRevision: UInt64 = 0
     private var searchBotPeers: [String: MusicChat] = [:]
     private var isResolvingImportedMusic = false
+    private var importedMusicIsForeground = true
+    private var importedMusicWaitBudget: ImportedMusicWaitBudget?
     private var importedMusicRetryAfter: [String: Foundation.Date] = [:]
     private var lyricsAttachmentCache: [String: [TelegramLyricsAttachment]] = [:]
     private var replacingSession = false
@@ -765,6 +767,12 @@ actor TelegramService {
             .compactMap(TelegramMapping.botMessage(from:))
     }
 
+    func setImportedMusicForeground(_ foreground: Bool) {
+        importedMusicIsForeground = foreground
+        importedMusicWaitBudget?.setForeground(foreground, now: Foundation.Date())
+        PlaybackDiagnostics.log("imported_music_foreground active=\(foreground) resolving=\(isResolvingImportedMusic)")
+    }
+
     func resolveImportedMusic(_ entry: ImportedPlaylistEntry, using config: SearchBotConfig) async throws -> Track {
         guard !isResolvingImportedMusic else {
             throw ServiceError.telegram("Another playlist song is still being requested. Please try again shortly.")
@@ -774,10 +782,12 @@ actor TelegramService {
             throw ServiceError.telegram("The previous music request may still be queued. Wait one minute before retrying.")
         }
         isResolvingImportedMusic = true
+        let requestID = UUID().uuidString
         var completed = false
         var startedRequest = false
         defer {
             isResolvingImportedMusic = false
+            importedMusicWaitBudget = nil
             if startedRequest && !completed { importedMusicRetryAfter[botKey] = Foundation.Date().addingTimeInterval(60) }
         }
         let bot = try await resolveSearchBot(config)
@@ -791,11 +801,13 @@ actor TelegramService {
             inputMessageContent: .inputMessageText(InputMessageText(clearDraft: false, linkPreviewOptions: nil,
                 text: FormattedText(entities: [], text: command))),
             options: nil, replyMarkup: nil, replyTo: nil, topicId: nil)
-        let deadline = Foundation.Date().addingTimeInterval(120)
+        importedMusicWaitBudget = ImportedMusicWaitBudget(now: Foundation.Date(), isForeground: importedMusicIsForeground)
+        PlaybackDiagnostics.log("imported_music_start request=\(requestID) expectedDuration=\(entry.duration) foreground=\(importedMusicIsForeground)")
         var commandIDs: Set<Int64> = []
         var matcher = ImportedMusicReplyMatcher(entry: entry)
         var lastReply = ""
-        while Foundation.Date() < deadline {
+        var loggedCandidates: Set<String> = []
+        while true {
             try Task.checkCancellation()
             try await Task.sleep(for: .seconds(2))
             let history = try await botHistoryMessages(client: client, chatID: bot.peerID, limit: 100)
@@ -819,8 +831,20 @@ actor TelegramService {
                         unavailableMessage = String(reason.prefix(300))
                     }
                 }
-                guard let track = TelegramMapping.track(from: message) else { continue }
-                if matcher.accepts(track, isRelated: belongsToRequest, replyID: replyID) {
+                guard let track = TelegramMapping.track(from: message) else {
+                    if case let .messageDocument(content) = message.content,
+                       loggedCandidates.insert("document:\(message.id)").inserted {
+                        PlaybackDiagnostics.log("imported_music_unmapped_document request=\(requestID) mime=\(content.document.mimeType)")
+                    }
+                    continue
+                }
+                let accepted = matcher.accepts(track, isRelated: belongsToRequest, replyID: replyID)
+                if loggedCandidates.insert("\(message.id):\(track.hashValue):\(belongsToRequest)").inserted {
+                    let reason = accepted ? "matched" : (replyID != nil && !belongsToRequest ? "unrelated_reply"
+                        : (belongsToRequest ? "duration_mismatch" : "metadata_mismatch"))
+                    PlaybackDiagnostics.log("imported_music_candidate request=\(requestID) related=\(belongsToRequest) hasReply=\(replyID != nil) expectedDuration=\(entry.duration) actualDuration=\(track.duration) reason=\(reason)")
+                }
+                if accepted {
                     completed = true
                     return track
                 }
@@ -829,12 +853,17 @@ actor TelegramService {
                 // A definitive negative reply completes the bot's job. It must
                 // release the gate without imposing the timeout retry delay.
                 completed = true
+                PlaybackDiagnostics.log("imported_music_unavailable request=\(requestID)")
                 throw ImportedMusicError.unavailable(unavailableMessage)
             }
+            // Always inspect fresh history before deciding to time out. A file
+            // may have arrived while this task was suspended in the background.
+            if importedMusicWaitBudget?.hasExpired(now: Foundation.Date()) == true { break }
         }
-        throw ServiceError.telegram(lastReply.isEmpty
-            ? "The music bot did not return a matching audio file within two minutes. You can retry or open the bot conversation."
-            : "The music bot did not return a matching audio file. \(lastReply)")
+        PlaybackDiagnostics.log("imported_music_timeout request=\(requestID) hasCommand=\(!commandIDs.isEmpty) hasProgress=\(!lastReply.isEmpty) foreground=\(importedMusicIsForeground)")
+        let timeoutMessage = NSLocalizedString("Timed out waiting for the music bot's audio file. You can retry or choose received audio.",
+            comment: "An imported playlist audio request timed out")
+        throw ServiceError.telegram(lastReply.isEmpty ? timeoutMessage : "\(timeoutMessage)\n\(lastReply)")
     }
 
     func searchBotChat(_ config: SearchBotConfig) async throws -> MusicChat {

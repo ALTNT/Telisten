@@ -93,6 +93,37 @@ struct ImportedMusicReplyMatcher {
     }
 }
 
+struct ImportedMusicWaitBudget {
+    private var remaining: TimeInterval = 120
+    private var lastUpdated: Date
+    private var isForeground: Bool
+    private var maximumDeadline: Date
+
+    init(now: Date, isForeground: Bool) {
+        lastUpdated = now
+        self.isForeground = isForeground
+        maximumDeadline = now.addingTimeInterval(15 * 60)
+    }
+
+    mutating func setForeground(_ foreground: Bool, now: Date) {
+        if isForeground { remaining -= max(0, now.timeIntervalSince(lastUpdated)) }
+        if foreground && !isForeground {
+            // TDLib may need a few seconds to deliver updates after suspension.
+            // Even a request suspended past its ceiling gets one recovery window.
+            remaining = max(remaining, 15)
+            maximumDeadline = max(maximumDeadline, now.addingTimeInterval(15))
+        }
+        isForeground = foreground
+        lastUpdated = now
+    }
+
+    mutating func hasExpired(now: Date) -> Bool {
+        setForeground(isForeground, now: now)
+        // Bound background polling too, even if the app is never suspended.
+        return remaining <= 0 || now >= maximumDeadline
+    }
+}
+
 enum ImportedMusicError: LocalizedError {
     case unavailable(String)
 

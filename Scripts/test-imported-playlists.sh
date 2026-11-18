@@ -21,7 +21,7 @@ start = source.index("    private func saveImportedPlaylistState(")
 end = source.index("    private func recordImportedBotSelection()", start)
 fixture = fixture.replace("    // IMPORTED_SAVE_METHOD", source[start:end])
 telegram = Path("Telisten/Telegram/TelegramService.swift").read_text()
-start = telegram.index("    func resolveImportedMusic(")
+start = telegram.index("    func setImportedMusicForeground(")
 end = telegram.index("    func searchBotChat(", start)
 Path(sys.argv[1]).write_text(fixture.replace("    // IMPORTED_RESOLVER_METHOD", telegram[start:end]))
 PY

@@ -69,6 +69,7 @@ private actor ForegroundConnectionHarness {
 }
 
 private actor ForegroundServiceProbe {
+    func setImportedMusicForeground(_ foreground: Bool) {}
     private var calls = 0
     func hasAuthorizedSession() -> Bool { true }
     func recoverConnectionAfterStandby() throws { calls += 1 }
