@@ -64,6 +64,7 @@ struct ListenTogetherView: View {
         .sheet(isPresented: $showContactPicker) {
             if let session = liveSessionValue {
                 ListenTogetherContactPicker(model: model, session: session)
+                    .allowsApplicationTermination()
             }
         }
         .task(id: liveSessionValue?.call.id) {

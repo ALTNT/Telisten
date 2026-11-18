@@ -32,10 +32,12 @@ struct NowPlayingView: View {
         .sheet(isPresented: isEmbedded ? .constant(false) : $model.showPlaylistSheet) {
             if let track = model.playlistTrack {
                 PlaylistSheet(model: model, track: track)
+                    .allowsApplicationTermination()
             }
         }
         .sheet(isPresented: isEmbedded ? .constant(false) : $model.showListenTogetherSheet) {
             ListenTogetherView(model: model)
+                .allowsApplicationTermination()
         }
         .task(id: model.player.track?.id) {
             guard let track = model.player.track else { return }
@@ -699,6 +701,7 @@ struct LyricsPanel: View {
         .buttonStyle(.plain)
         .sheet(isPresented: $isShowingMatchChooser) {
             lyricsMatchSheet(selected: selected)
+                .allowsApplicationTermination()
                 #if os(iOS)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)

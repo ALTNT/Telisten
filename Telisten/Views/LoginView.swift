@@ -50,6 +50,7 @@ struct LoginView: View {
         .background(Color.telistenBackground)
         .sheet(isPresented: $isShowingProxySettings) {
             TelegramProxySettingsView(controller: model.proxyController)
+                .allowsApplicationTermination()
         }
     }
 

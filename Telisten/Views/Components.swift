@@ -5,6 +5,35 @@ import UIKit
 import AppKit
 #endif
 
+extension View {
+    func allowsApplicationTermination() -> some View {
+        #if os(macOS)
+        background(ApplicationTerminationWindowConfiguration())
+        #else
+        self
+        #endif
+    }
+}
+
+#if os(macOS)
+private struct ApplicationTerminationWindowConfiguration: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { WindowView() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        view.window?.preventsApplicationTerminationWhenModal = false
+    }
+
+    private final class WindowView: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            // Sheets must allow Dock Quit and Command-Q, including on macOS 13.
+            // Configure each sheet's own window so nested sheets also allow quitting.
+            window?.preventsApplicationTerminationWhenModal = false
+        }
+    }
+}
+#endif
+
 extension Color {
     static let telistenAccent = Color(red: 0.96, green: 0.30, blue: 0.24)
     static let telistenBackground = Color.primary.opacity(0.035)

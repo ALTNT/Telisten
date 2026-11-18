@@ -183,6 +183,7 @@ struct BotSearchConversationView: View {
             }
             .sheet(item: $playlistTrack) { track in
                 PlaylistSheet(model: model, track: track)
+                    .allowsApplicationTermination()
             }
         }
     }

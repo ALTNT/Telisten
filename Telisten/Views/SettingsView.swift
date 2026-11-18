@@ -30,6 +30,7 @@ struct SettingsView: View {
                 }
                 .sheet(isPresented: $isShowingProxySettings) {
                     TelegramProxySettingsView(controller: model.proxyController)
+                        .allowsApplicationTermination()
                 }
                 Section("Library") {
                     Toggle("Show chats on homepage", isOn: $model.showChats)
@@ -233,6 +234,7 @@ struct SettingsView: View {
         }
         .sheet(item: $editingSearchBot) { config in
             SearchBotEditorView(model: model, config: config)
+                .allowsApplicationTermination()
         }
         #if os(iOS)
         .sheet(isPresented: $isSharingLogs, onDismiss: {

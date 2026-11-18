@@ -128,6 +128,7 @@ struct LibraryView: View {
             }
             .sheet(isPresented: $showSettings) {
                 SettingsView(model: model)
+                    .allowsApplicationTermination()
             }
             .onChange(of: wideLayout) { isWide in
                 if isWide { columnVisibility = .all }
@@ -135,9 +136,11 @@ struct LibraryView: View {
             #else
             .sheet(isPresented: $model.showNowPlaying, onDismiss: presentPendingSettings) {
                 NowPlayingView(model: model)
+                    .allowsApplicationTermination()
             }
             .sheet(isPresented: $showSettings) {
                 SettingsView(model: model)
+                    .allowsApplicationTermination()
             }
             #endif
             .overlay(alignment: .top) {
@@ -161,16 +164,19 @@ struct LibraryView: View {
             .sheet(isPresented: $model.showPlaylistSheet) {
                 if let track = model.playlistTrack {
                     PlaylistSheet(model: model, track: track)
+                        .allowsApplicationTermination()
                 }
             }
             .sheet(isPresented: $showImportedPlaylists) {
                 ImportedPlaylistsView(model: model).id(model.activeAccountID)
+                    .allowsApplicationTermination()
             }
             .sheet(item: $batchPlaylistSelection) { selection in
                 BatchPlaylistSheet(model: model, tracks: selection.tracks) { savedID in
                     selectedTrackIDs.remove(savedID)
                     if selectedTrackIDs.isEmpty { finishSelectingTracks() }
                 }
+                .allowsApplicationTermination()
             }
             .confirmationDialog(
                 batchRemovalTitle,
@@ -185,6 +191,7 @@ struct LibraryView: View {
             }
             .sheet(isPresented: $model.showListenTogetherSheet) {
                 ListenTogetherView(model: model)
+                    .allowsApplicationTermination()
             }
             .sheet(isPresented: $showVideos) {
                 VideoLibraryView(library: model.makeVideoLibrary(), musicPlayer: model.player)
@@ -209,6 +216,7 @@ struct LibraryView: View {
             #endif
             .sheet(isPresented: $model.showBotSearch) {
                 BotSearchConversationView(model: model)
+                    .allowsApplicationTermination()
                     #if os(macOS)
                     .frame(minWidth: 360, minHeight: 520)
                     #endif

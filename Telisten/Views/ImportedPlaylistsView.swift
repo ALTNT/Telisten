@@ -258,6 +258,7 @@ struct ImportedPlaylistDetailView: View {
         .navigationTitle(playlist?.title ?? "")
         .sheet(item: $choosingSource) { entry in
             ImportedAudioPicker(model: model, playlistID: playlistID, entry: entry)
+                .allowsApplicationTermination()
                 .id(model.activeAccountID)
         }
     }
