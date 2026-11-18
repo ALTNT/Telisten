@@ -86,12 +86,24 @@ final class AppModel: ObservableObject {
     @Published var downloadingPlaylistIDs: Set<String> = []
     @Published private(set) var importedPlaylists: [ImportedPlaylist] = []
     @Published private(set) var importedPlaylistErrors: [String: [String: String]] = [:]
+    @Published private(set) var importedPlaylistSyncState = ImportedPlaylistSyncState()
+    @Published private(set) var isSyncingImportedPlaylists = false
+    @Published private(set) var importedPlaylistSyncError: String?
+    @Published var importedPlaylistSyncEnabled = true {
+        didSet {
+            guard !isApplyingImportedSync else { return }
+            UserDefaults.standard.set(importedPlaylistSyncEnabled, forKey: accountStorageKey("importedPlaylist.syncEnabled"))
+            if importedPlaylistSyncEnabled { scheduleImportedPlaylistSync() }
+            else { importedSyncTask?.cancel(); importedSyncScheduleTask?.cancel() }
+        }
+    }
     @Published private(set) var resolvingImportedEntryID: String?
     @Published private(set) var playingImportedPlaylistID: String?
     @Published private(set) var playingImportedEntryID: String?
     @Published var importedPlaylistBotID: UUID? {
         didSet {
             UserDefaults.standard.set(importedPlaylistBotID?.uuidString, forKey: accountStorageKey("importedPlaylist.botID"))
+            if oldValue != importedPlaylistBotID { recordImportedBotSelection() }
         }
     }
     @Published var showChats = false {
@@ -119,6 +131,12 @@ final class AppModel: ObservableObject {
     private var importedPlaybackTask: Task<Void, Never>?
     private var importedPlaybackOperationID: UUID?
     private var isStartingImportedTrack = false
+    private var isApplyingImportedSync = false
+    private var importedSyncTask: Task<Void, Never>?
+    private var importedSyncScheduleTask: Task<Void, Never>?
+    private var importedSyncOperationID: UUID?
+    private var importedSyncNeedsAnotherPass = false
+    private var importedSyncStorageIsValid = true
     private let libraryPersistenceQueue = DispatchQueue(
         label: "Telisten.AppModel.library-persistence",
         qos: .utility
@@ -276,6 +294,7 @@ final class AppModel: ObservableObject {
                 await refreshPlaylists()
                 phase = .ready
                 beginMusicChatIndexing()
+                scheduleImportedPlaylistSync()
                 errorMessage = nil
                 return
             } catch {
@@ -879,7 +898,7 @@ final class AppModel: ObservableObject {
             values.append(updated)
         }
         do {
-            try importedPlaylistStore.save(values, for: localMirrorAccountID)
+            try saveImportedPlaylistState(values, change: .playlist(updated))
             if playingImportedPlaylistID == playlist.id { cancelImportedPlayback() }
             importedPlaylists = values
             importedPlaylistErrors[playlist.id] = nil
@@ -893,7 +912,7 @@ final class AppModel: ObservableObject {
     func deleteImportedPlaylist(_ id: String) {
         let values = importedPlaylists.filter { $0.id != id }
         do {
-            try importedPlaylistStore.save(values, for: localMirrorAccountID)
+            try saveImportedPlaylistState(values, change: .delete(id))
             if playingImportedPlaylistID == id { cancelImportedPlayback() }
             importedPlaylists = values
             importedPlaylistErrors[id] = nil
@@ -910,7 +929,8 @@ final class AppModel: ObservableObject {
         var values = importedPlaylists
         values[index].entries[entryIndex].track = track
         do {
-            try importedPlaylistStore.save(values, for: localMirrorAccountID)
+            try saveImportedPlaylistState(values, change: .source(playlistID: playlistID,
+                songID: values[index].entries[entryIndex].songID, source: track.map(ImportedAudioSource.init)))
             importedPlaylists = values
             importedPlaylistErrors[playlistID]?[entryID] = nil
             if let track { install([track]) }
@@ -935,12 +955,13 @@ final class AppModel: ObservableObject {
         guard resolvingImportedEntryID == nil,
               let playlist = importedPlaylists.first(where: { $0.id == playlistID }),
               let entry = playlist.entries.first(where: { $0.id == entryID }) else { return }
-        guard entry.track != nil || !isBotSearching else {
+        let syncedSource = importedPlaylistSyncState.source(playlistID: playlistID, songID: entry.songID)
+        guard entry.track != nil || syncedSource != nil || !isBotSearching else {
             errorMessage = "Wait for the current bot search to finish before requesting a playlist song."
             return
         }
         let config = searchBots.first { $0.id == importedPlaylistBotID }
-        guard entry.track != nil || config != nil else {
+        guard entry.track != nil || syncedSource != nil || config != nil else {
             errorMessage = "Choose a MusicBot in Imported playlists before playing an unresolved song."
             return
         }
@@ -969,16 +990,23 @@ final class AppModel: ObservableObject {
                 let track: Track
                 if let existing = entry.track {
                     track = existing
-                } else if let config {
-                    track = try await telegram.resolveImportedMusic(entry, using: config)
-                } else { return }
+                } else {
+                    let restored: Track?
+                    if let syncedSource, let accountID {
+                        restored = try await telegram.restoreImportedAudioSource(syncedSource, expectedAccountID: accountID)
+                    } else { restored = nil }
+                    if let restored { track = restored }
+                    else if let config { track = try await telegram.resolveImportedMusic(entry, using: config) }
+                    else { throw ImportedMusicError.unavailable("The synced audio is no longer accessible. Choose a MusicBot or another received audio file.") }
+                }
                 guard !Task.isCancelled, activeAccountID == accountID,
                       importedPlaybackOperationID == operationID,
                       let index = importedPlaylists.firstIndex(where: { $0.id == playlistID }),
                       let entryIndex = importedPlaylists[index].entries.firstIndex(where: { $0.id == entryID }) else { return }
                 var values = importedPlaylists
                 values[index].entries[entryIndex].track = track
-                try importedPlaylistStore.save(values, for: localMirrorAccountID)
+                try saveImportedPlaylistState(values, change: .source(playlistID: playlistID,
+                    songID: entry.songID, source: ImportedAudioSource(track)))
                 importedPlaylists = values
                 install([track])
                 // Imported entries keep their own queue identity. Only resolved
@@ -1929,6 +1957,7 @@ final class AppModel: ObservableObject {
             guard backgroundedAt == nil, activeAccountID == expectedAccountID else { return }
         }
         guard phase == .ready else { return }
+        scheduleImportedPlaylistSync()
         for trackID in pendingDownloadResumeIDs.sorted() {
             if cachedIDs.contains(trackID) {
                 clearPendingDownloadResumeID(trackID)
@@ -2085,6 +2114,7 @@ final class AppModel: ObservableObject {
             searchBots = previous
             return "Telisten couldn’t save this bot search to Keychain."
         }
+        if importedPlaylistBotID == normalized.id { recordImportedBotSelection() }
         return nil
     }
 
@@ -2096,6 +2126,7 @@ final class AppModel: ObservableObject {
             errorMessage = "Telisten couldn’t update bot searches in Keychain."
             return
         }
+        if importedPlaylistBotID == id { importedPlaylistBotID = nil }
     }
 
     func moveSearchBots(fromOffsets offsets: IndexSet, toOffset destination: Int) {
@@ -2730,6 +2761,7 @@ final class AppModel: ObservableObject {
             await refreshPlaylists(expectedAccountID: accountID)
             guard !Task.isCancelled, activeAccountID == accountID else { return }
             beginMusicChatIndexing()
+            scheduleImportedPlaylistSync()
         } catch is CancellationError {
             return
         } catch {
@@ -2773,6 +2805,7 @@ final class AppModel: ObservableObject {
             await refreshPlaylists()
             phase = .ready
             beginMusicChatIndexing()
+            scheduleImportedPlaylistSync()
             errorMessage = nil
         } catch {
             if UserFacingError.isExpiredTelegramSession(error) {
@@ -2788,6 +2821,15 @@ final class AppModel: ObservableObject {
     }
 
     private func resetForAccountTransition() {
+        importedSyncTask?.cancel()
+        importedSyncTask = nil
+        importedSyncScheduleTask?.cancel()
+        importedSyncScheduleTask = nil
+        importedSyncOperationID = nil
+        isSyncingImportedPlaylists = false
+        importedPlaylistSyncError = nil
+        importedPlaylistSyncState = ImportedPlaylistSyncState()
+        importedSyncNeedsAnotherPass = false
         cancelImportedPlayback()
         importedPlaylists = []
         importedPlaylistErrors = [:]
@@ -3759,8 +3801,7 @@ final class AppModel: ObservableObject {
 
     private func restoreLibrary() {
         let defaults = UserDefaults.standard
-        importedPlaylists = importedPlaylistStore.load(for: localMirrorAccountID)
-        importedPlaylistBotID = defaults.string(forKey: accountStorageKey("importedPlaylist.botID")).flatMap(UUID.init(uuidString:))
+        restoreImportedPlaylistSync()
         pendingDownloadResumeIDs = Set(
             defaults.stringArray(forKey: accountStorageKey("downloads.pendingResume")) ?? []
         )
@@ -3934,5 +3975,187 @@ final class AppModel: ObservableObject {
             try? JSONEncoder().encode(musicChatIndex),
             forKey: accountStorageKey("music.chatIndex")
         )
+    }
+}
+
+extension AppModel {
+    func syncImportedPlaylists() async {
+        guard importedPlaylistSyncEnabled, !isDemo, !isAddingAccount, phase == .ready,
+              let accountID = activeAccountID, importedSyncStorageIsValid else { return }
+        if let existing = importedSyncTask { await existing.value; return }
+        let operationID = UUID()
+        importedSyncOperationID = operationID
+        importedSyncNeedsAnotherPass = false
+        isSyncingImportedPlaylists = true
+        importedPlaylistSyncError = nil
+        importedSyncTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if importedSyncOperationID == operationID {
+                    importedSyncTask = nil
+                    isSyncingImportedPlaylists = false
+                    let again = importedSyncNeedsAnotherPass && importedPlaylistSyncEnabled
+                    importedSyncNeedsAnotherPass = false
+                    if again { scheduleImportedPlaylistSync() }
+                }
+            }
+            do {
+                let location = try await telegram.prepareImportedPlaylistSync(expectedAccountID: accountID,
+                    expectedOwnerID: importedPlaylistSyncState.ownerUserID,
+                    createIfMissing: !importedPlaylistSyncState.pendingUploadRecords.isEmpty)
+                try checkImportedPlaylistSync(accountID, operationID: operationID)
+                for chatID in location.chatIDs {
+                    let cursor = importedPlaylistSyncState.cursors[String(chatID)] ?? 0
+                    let pull = try await telegram.pullImportedPlaylistSync(chatID: chatID, after: cursor,
+                        ownerID: location.ownerUserID, expectedAccountID: accountID)
+                    try checkImportedPlaylistSync(accountID, operationID: operationID)
+                    // Local edits can happen during awaits. Always merge into the
+                    // current state, never a snapshot captured before networking.
+                    var next = importedPlaylistSyncState
+                    next.ownerUserID = location.ownerUserID
+                    try next.merge(pull.records)
+                    next.cursors[String(chatID)] = pull.lastMessageID
+                    try applyImportedPlaylistSyncState(next)
+                }
+                let pending = importedPlaylistSyncState.pendingUploadRecords
+                if location.uploadChatID == 0 && !pending.isEmpty {
+                    // The first local import may have arrived while an empty
+                    // remote account was being checked. Set up its channel next.
+                    importedSyncNeedsAnotherPass = true
+                    return
+                }
+                for envelope in try ImportedPlaylistSyncEnvelope.batches(pending, ownerUserID: location.ownerUserID) {
+                    try checkImportedPlaylistSync(accountID, operationID: operationID)
+                    try await telegram.pushImportedPlaylistSync(envelope, chatID: location.uploadChatID, expectedAccountID: accountID)
+                    try checkImportedPlaylistSync(accountID, operationID: operationID)
+                    var next = importedPlaylistSyncState
+                    next.acknowledge(Set(envelope.records.map(\.id)))
+                    // Do not advance the pull cursor to our upload receipt: that
+                    // would skip another device's intervening upload.
+                    try importedPlaylistStore.saveSynchronized(importedPlaylists, state: next, for: localMirrorAccountID)
+                    importedPlaylistSyncState = next
+                }
+                var next = importedPlaylistSyncState
+                next.lastSyncedAt = Date()
+                try importedPlaylistStore.saveSynchronized(importedPlaylists, state: next, for: localMirrorAccountID)
+                importedPlaylistSyncState = next
+            } catch is CancellationError {
+                return
+            } catch {
+                guard activeAccountID == accountID, importedSyncOperationID == operationID else { return }
+                importedPlaylistSyncError = UserFacingError.message(for: error)
+            }
+        }
+        await importedSyncTask?.value
+    }
+
+    func resolveImportedPlaylistSyncConflict(_ key: String, keepingLocal: Bool) {
+        guard importedSyncStorageIsValid, importedPlaylistSyncState.conflicts[key] != nil else { return }
+        var next = importedPlaylistSyncState
+        next.resolve(key, keepingLocal: keepingLocal)
+        do {
+            try applyImportedPlaylistSyncState(next)
+            scheduleImportedPlaylistSync()
+        } catch { importedPlaylistSyncError = UserFacingError.message(for: error) }
+    }
+
+    private func restoreImportedPlaylistSync() {
+        isApplyingImportedSync = true
+        defer { isApplyingImportedSync = false }
+        let defaults = UserDefaults.standard
+        importedPlaylists = importedPlaylistStore.load(for: localMirrorAccountID)
+        importedPlaylistBotID = defaults.string(forKey: accountStorageKey("importedPlaylist.botID")).flatMap(UUID.init(uuidString:))
+        let enabledKey = accountStorageKey("importedPlaylist.syncEnabled")
+        importedPlaylistSyncEnabled = defaults.object(forKey: enabledKey) == nil || defaults.bool(forKey: enabledKey)
+        importedSyncStorageIsValid = true
+        importedPlaylistSyncState = ImportedPlaylistSyncState()
+        do {
+            var next = try importedPlaylistStore.loadSyncState(for: localMirrorAccountID)
+            let previous = next
+            next.bootstrap(importedPlaylists, bot: searchBots.first(where: { $0.id == importedPlaylistBotID }).map(ImportedSyncBot.init))
+            if next != previous {
+                try importedPlaylistStore.saveSynchronized(importedPlaylists, state: next, for: localMirrorAccountID)
+            }
+            importedPlaylistSyncState = next
+        } catch {
+            importedSyncStorageIsValid = false
+            importedPlaylistSyncError = UserFacingError.message(for: error)
+        }
+    }
+
+    // Keep the visible library and its outbox in one atomic file. An offline
+    // deletion must survive termination just as reliably as the playlist itself.
+    private func saveImportedPlaylistState(_ values: [ImportedPlaylist], change: ImportedPlaylistSyncChange) throws {
+        guard importedSyncStorageIsValid else { throw ImportedPlaylistSyncError.invalidData }
+        var next = importedPlaylistSyncState
+        next.record(change)
+        if case let .playlist(playlist) = change {
+            for entry in playlist.entries {
+                if let track = entry.track {
+                    next.record(.source(playlistID: playlist.id, songID: entry.songID, source: ImportedAudioSource(track)))
+                }
+            }
+        }
+        try importedPlaylistStore.saveSynchronized(values, state: next, for: localMirrorAccountID)
+        importedPlaylistSyncState = next
+        scheduleImportedPlaylistSync()
+    }
+
+    private func recordImportedBotSelection() {
+        guard !isApplyingImportedSync else { return }
+        let bot = searchBots.first { $0.id == importedPlaylistBotID }.map(ImportedSyncBot.init)
+        do { try saveImportedPlaylistState(importedPlaylists, change: .bot(bot)) }
+        catch { importedPlaylistSyncError = UserFacingError.message(for: error) }
+    }
+
+    private func scheduleImportedPlaylistSync() {
+        guard importedPlaylistSyncEnabled, !isDemo, !isAddingAccount, phase == .ready else { return }
+        if importedSyncTask != nil { importedSyncNeedsAnotherPass = true; return }
+        importedSyncScheduleTask?.cancel()
+        importedSyncScheduleTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(2)) }
+            catch { return }
+            guard let self, !Task.isCancelled else { return }
+            await self.syncImportedPlaylists()
+        }
+    }
+
+    private func checkImportedPlaylistSync(_ accountID: String, operationID: UUID) throws {
+        try Task.checkCancellation()
+        guard activeAccountID == accountID, importedSyncOperationID == operationID,
+              importedPlaylistSyncEnabled else { throw CancellationError() }
+    }
+
+    private func applyImportedPlaylistSyncState(_ next: ImportedPlaylistSyncState) throws {
+        let values = next.playlists(preservingLocalTracks: importedPlaylists)
+        try importedPlaylistStore.saveSynchronized(values, state: next, for: localMirrorAccountID)
+        if let playlistID = playingImportedPlaylistID {
+            let oldEntry = importedPlaylists.first { $0.id == playlistID }?.entries.first { $0.id == playingImportedEntryID }
+            let newPlaylist = values.first { $0.id == playlistID }
+            let newEntry = newPlaylist?.entries.first { $0.id == playingImportedEntryID }
+                ?? newPlaylist?.entries.first { $0.songID == oldEntry?.songID }
+            if let newEntry {
+                if resolvingImportedEntryID != nil,
+                   newEntry.id != resolvingImportedEntryID
+                    || importedPlaylistSyncState.source(playlistID: playlistID, songID: newEntry.songID)
+                        != next.source(playlistID: playlistID, songID: newEntry.songID) { cancelImportedPlayback() }
+                else { playingImportedEntryID = newEntry.id }
+            } else { cancelImportedPlayback() }
+        }
+        importedPlaylists = values
+        importedPlaylistSyncState = next
+        isApplyingImportedSync = true
+        defer { isApplyingImportedSync = false }
+        if let record = next.records["bot"] {
+            if let bot = record.bot {
+                if let config = searchBots.first(where: { ImportedSyncBot($0) == bot }) {
+                    importedPlaylistBotID = config.id
+                } else {
+                    let config = bot.config
+                    if let error = upsertSearchBot(config) { throw ImportedMusicError.unavailable(error) }
+                    importedPlaylistBotID = config.id
+                }
+            } else { importedPlaylistBotID = nil }
+        }
     }
 }

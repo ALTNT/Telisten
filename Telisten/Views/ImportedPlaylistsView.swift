@@ -25,7 +25,7 @@ struct ImportedPlaylistsView: View {
                         .disabled(isReading || sharedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     if isReading { ProgressView("Reading playlist…") }
                     if let importError { Text(localizedUI(importError)).foregroundStyle(.red) }
-                    Text("Import saves the song list on this device. Audio is requested only when you play a song.")
+                    Text("Import saves the song list. Telegram sync shares it with your other devices. Audio is requested only when you play a song.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if let preview {
@@ -59,6 +59,34 @@ struct ImportedPlaylistsView: View {
                         }
                     }
                     Text("Choose a bot that supports /music with NetEase and QQ Music song links. Add bots in Settings first. The bot's default quality is used.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Section("Playlist sync") {
+                    Toggle("Sync using Telegram", isOn: $model.importedPlaylistSyncEnabled)
+                    if model.isSyncingImportedPlaylists {
+                        ProgressView("Syncing playlists…")
+                    }
+                    if let date = model.importedPlaylistSyncState.lastSyncedAt {
+                        LabeledContent("Last synced", value: date.formatted(date: .abbreviated, time: .shortened))
+                    }
+                    if !model.importedPlaylistSyncState.pending.isEmpty {
+                        Text("\(model.importedPlaylistSyncState.pending.count) changes waiting to sync")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if let error = model.importedPlaylistSyncError {
+                        Text(localizedUI(error)).font(.caption).foregroundStyle(.red)
+                    }
+                    Button("Sync now") { Task { await model.syncImportedPlaylists() } }
+                        .disabled(!model.importedPlaylistSyncEnabled || model.isSyncingImportedPlaylists || model.isDemo || model.activeAccountID == nil)
+                    if !model.importedPlaylistSyncState.conflicts.isEmpty {
+                        NavigationLink {
+                            ImportedPlaylistSyncConflictsView(model: model)
+                        } label: {
+                            Text("Resolve sync conflicts")
+                        }
+                        .badge(model.importedPlaylistSyncState.conflicts.count)
+                    }
+                    Text("Uses a private Telisten Sync channel in this Telegram account. Audio downloads stay on each device.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section("Imported playlists") {
@@ -109,6 +137,52 @@ struct ImportedPlaylistsView: View {
                 guard !Task.isCancelled, model.activeAccountID == accountID else { return }
                 importError = error.localizedDescription
             }
+        }
+    }
+}
+
+private struct ImportedPlaylistSyncConflictsView: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        List {
+            Text("This device and another device changed the same item. Choose which version to keep.")
+                .font(.caption).foregroundStyle(.secondary)
+            ForEach(model.importedPlaylistSyncState.conflicts.values.sorted { $0.id < $1.id }) { conflict in
+                Section {
+                    Text(title(conflict)).font(.headline)
+                    LabeledContent("This device", value: summary(conflict.local))
+                    LabeledContent("Synced version", value: summary(conflict.remote))
+                    Button("Keep this device's change") {
+                        model.resolveImportedPlaylistSyncConflict(conflict.id, keepingLocal: true)
+                    }
+                    Button("Use synced change") {
+                        model.resolveImportedPlaylistSyncConflict(conflict.id, keepingLocal: false)
+                    }
+                }
+            }
+        }
+        .navigationTitle("Resolve sync conflicts")
+    }
+
+    private func title(_ conflict: ImportedPlaylistSyncConflict) -> String {
+        let record = conflict.local
+        switch record.kind {
+        case .playlist: return record.playlist?.title ?? conflict.remote.playlist?.title ?? record.playlistID ?? ""
+        case .source:
+            return model.importedPlaylists.first { $0.id == record.playlistID }?.entries.first { $0.songID == record.songID }?.title
+                ?? localizedUI("Song audio")
+        case .bot: return localizedUI("Playback bot")
+        }
+    }
+
+    private func summary(_ record: ImportedPlaylistSyncRecord) -> String {
+        switch record.kind {
+        case .playlist:
+            guard let playlist = record.playlist else { return localizedUI("Deleted playlist") }
+            return "\(playlist.title) · \(playlist.entries.count)"
+        case .source: return localizedUI(record.source == nil ? "No matched audio" : "Matched audio")
+        case .bot: return record.bot.map { "@\($0.username) \($0.prefix)…\($0.suffix)" } ?? localizedUI("Choose a bot")
         }
     }
 }
@@ -169,7 +243,7 @@ struct ImportedPlaylistDetailView: View {
                         .contextMenu {
                             Link("Open original song", destination: entry.songURL)
                             Button("Choose received audio") { choosingSource = entry }
-                            if entry.track != nil {
+                            if entry.track != nil || model.importedPlaylistSyncState.source(playlistID: playlist.id, songID: entry.songID) != nil {
                                 Button("Forget matched audio") {
                                     model.clearImportedSource(playlistID: playlist.id, entryID: entry.id)
                                 }
@@ -190,7 +264,10 @@ struct ImportedPlaylistDetailView: View {
 
     private func statusSymbol(_ entry: ImportedPlaylistEntry) -> String {
         if model.importedPlaylistErrors[playlistID]?[entry.id] != nil { return "exclamationmark.circle" }
-        guard let track = entry.track else { return "cloud" }
+        guard let track = entry.track else {
+            return model.importedPlaylistSyncState.source(playlistID: playlistID, songID: entry.songID) == nil
+                ? "cloud" : "checkmark.circle"
+        }
         return model.cachedIDs.contains(track.id) ? "arrow.down.circle.fill" : "checkmark.circle"
     }
 }

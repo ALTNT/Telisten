@@ -96,6 +96,7 @@ private final class ForegroundAppHarness {
     var cachedIDs: Set<String> = []
     var resumingDownloadIDs: Set<String> = []
     var knownTracks: [String: String] = [:]
+    var scheduledPlaylistSyncs = 0
     init(phase: Phase, secondsInBackground: Double) {
         self.phase = phase
         backgroundedAt = Date().addingTimeInterval(-secondsInBackground)
@@ -103,6 +104,7 @@ private final class ForegroundAppHarness {
     func persistPendingDownloadResumeIDs() {}
     func clearPendingDownloadResumeID(_ id: String) {}
     func resumePendingDownload(_ track: String, retryAfterFailure: Bool) async {}
+    func scheduleImportedPlaylistSync() { scheduledPlaylistSyncs += 1 }
 
     // FOREGROUND_APP_METHODS
 }
@@ -119,6 +121,9 @@ private enum ForegroundConnectionTests {
         await shortBackground.applicationDidBecomeActive()
         let shortCount = await shortBackground.telegram.count()
         precondition(shortCount == 0)
+        precondition(shortBackground.scheduledPlaylistSyncs == 1)
+        precondition(connectingApp.scheduledPlaylistSyncs == 0,
+                     "Playlist sync must wait until the account's library is ready")
         let signingIn = ForegroundAppHarness(phase: .connecting, secondsInBackground: 60)
         signingIn.isAddingAccount = true
         await signingIn.applicationDidBecomeActive()

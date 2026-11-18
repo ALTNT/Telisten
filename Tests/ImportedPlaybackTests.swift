@@ -98,9 +98,14 @@ private final class ImportedTestPlayer {
 private actor ImportedTestTelegram {
     let track: Track
     var requests = 0
+    var restoreRequests = 0
     var unavailableSongIDs: Set<String> = []
     init(track: Track) { self.track = track }
     func setUnavailableSongs(_ ids: Set<String>) { unavailableSongIDs = ids }
+    func restoreImportedAudioSource(_ source: ImportedAudioSource, expectedAccountID: String) throws -> Track? {
+        restoreRequests += 1
+        return track
+    }
     func resolveImportedMusic(_ entry: ImportedPlaylistEntry, using config: SearchBotConfig) async throws -> Track {
         requests += 1
         try await Task.sleep(for: .milliseconds(80))
@@ -116,6 +121,8 @@ private actor ImportedTestTelegram {
 private final class ImportedPlaybackHarness {
     var importedPlaylists: [ImportedPlaylist] = []
     var importedPlaylistErrors: [String: [String: String]] = [:]
+    var importedPlaylistSyncState = ImportedPlaylistSyncState()
+    var importedSyncStorageIsValid = true
     var searchBots = [SearchBotConfig(botName: "TestMusicBot")]
     var importedPlaylistBotID: UUID?
     var resolvingImportedEntryID: String?
@@ -142,6 +149,7 @@ private final class ImportedPlaybackHarness {
         importedPlaylistBotID = searchBots.first!.id
     }
     func install(_ tracks: [Track]) {}
+    func scheduleImportedPlaylistSync() {}
     func play(_ track: Track, from list: [Track]?) {
         if !isStartingImportedTrack { cancelImportedPlayback() }
         player.track = track
@@ -149,6 +157,7 @@ private final class ImportedPlaybackHarness {
     }
 
     // IMPORTED_PLAYBACK_METHODS
+    // IMPORTED_SAVE_METHOD
 }
 
 @main
@@ -157,7 +166,7 @@ private enum ImportedPlaybackTests {
     static func main() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let track = Track(documentID: 1, accessHash: 0, fileReference: Data(), dcID: 2, messageID: 3, chatID: "u:1",
+        let track = Track(documentID: 1, accessHash: 0, fileReference: Data(), dcID: 2, messageID: 3, chatID: "1",
             title: "Song", artist: "Artist", fileName: "Song.flac", mimeType: "audio/flac", duration: 200, size: 500,
             date: Date(), upvoteCount: nil, didUpvote: nil)
         let entry = ImportedPlaylistEntry(id: "1:0", songID: "1", title: "Song", artists: ["Artist"], album: "", duration: 200,
@@ -250,6 +259,16 @@ private enum ImportedPlaybackTests {
                      "A definitive failure must release the gate without a timeout cooldown")
         let resolved = try await resolver.resolveImportedMusic(secondEntry, using: config)
         precondition(resolved == track, "The next request must succeed despite a late unavailable reply for the old command")
+        let restoredModel = ImportedPlaybackHarness(directory: directory.appendingPathComponent("restored"), track: track)
+        try restoredModel.importedPlaylistSyncState.merge(unavailableModel.importedPlaylistSyncState.pendingUploadRecords)
+        restoredModel.importedPlaylists = restoredModel.importedPlaylistSyncState.playlists(preservingLocalTracks: [])
+        restoredModel.importedPlaylistBotID = nil
+        restoredModel.playImportedEntry(entry.id, in: playlist.id)
+        await restoredModel.importedPlaybackTask?.value
+        let restoreRequests = await restoredModel.telegram.restoreRequests
+        let botRequests = await restoredModel.telegram.requests
+        precondition(restoreRequests == 1 && botRequests == 0 && restoredModel.player.track == track,
+                     "A new device must restore the message's own file ID without issuing another bot command")
         print("PASS: imports without requests, duplicate taps, reuse, cancellation, account switching and manual bot exclusion")
         print("PASS: unavailable replies release waiting, mark only the affected entry, allow another song and support explicit retry")
         print("PASS: production bot polling detects unavailable replies, releases its gate and ignores stale failures")

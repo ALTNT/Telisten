@@ -841,6 +841,187 @@ actor TelegramService {
         try await resolveSearchBot(config)
     }
 
+    func prepareImportedPlaylistSync(expectedAccountID: String, expectedOwnerID: Int64?, createIfMissing: Bool) async throws -> ImportedPlaylistSyncLocation {
+        let client = try await requireReadyClient()
+        try checkImportedSyncAccount(expectedAccountID, client: client)
+        let me = try await client.getMe()
+        guard expectedOwnerID == nil || expectedOwnerID == me.id else { throw ImportedPlaylistSyncError.accountChanged }
+        let saved = try await client.createPrivateChat(force: true, userId: me.id)
+        let marker = "#TelistenImportedPlaylistSyncIndexV1"
+        var channelIDs: Set<Int64> = []
+        var from: Int64 = 0
+        repeat {
+            try checkImportedSyncAccount(expectedAccountID, client: client)
+            let page = try await client.searchChatMessages(chatId: saved.id, filter: nil, fromMessageId: from,
+                limit: 100, offset: 0, query: marker, senderId: nil, topicId: nil)
+            for message in page.messages where message.sendingState == nil {
+                let lines = TelegramMapping.text(from: message).components(separatedBy: .newlines)
+                if lines.count == 3, lines[0] == marker, lines[1] == String(me.id), let id = Int64(lines[2]) {
+                    channelIDs.insert(id)
+                }
+            }
+            let next = page.nextFromMessageId
+            guard next == 0 || next != from else { throw ImportedPlaylistSyncError.invalidData }
+            from = next
+        } while from != 0
+        if channelIDs.isEmpty {
+            // Recover a channel created before a crash that prevented its index
+            // message from being sent. The title alone never authorizes uploads.
+            let candidates = try await client.searchChatsOnServer(limit: 100, query: "Telisten Sync", typeFilter: nil)
+            for id in candidates.chatIds {
+                if (try? await validateImportedSyncChannel(id, ownerID: me.id, client: client)) == true { channelIDs.insert(id) }
+            }
+            if channelIDs.isEmpty && !createIfMissing {
+                return ImportedPlaylistSyncLocation(ownerUserID: me.id, chatIDs: [], uploadChatID: 0)
+            }
+            if channelIDs.isEmpty {
+                try checkImportedSyncAccount(expectedAccountID, client: client)
+                let chat = try await client.createNewSupergroupChat(
+                    description: importedSyncChannelDescription(me.id), forImport: false, isChannel: true,
+                    isForum: false, location: nil, messageAutoDeleteTime: 0, title: "Telisten Sync")
+                channelIDs.insert(chat.id)
+            }
+            for id in channelIDs.sorted() {
+                let text = "\(marker)\n\(me.id)\n\(id)"
+                _ = try await sendImportedSyncMessage(.inputMessageText(InputMessageText(clearDraft: false,
+                    linkPreviewOptions: nil, text: FormattedText(entities: [], text: text))),
+                    caption: text, chatID: saved.id, expectedAccountID: expectedAccountID, client: client)
+            }
+        }
+        // Simultaneous first-time setup may create two channels. Read both
+        // indexed streams and consistently publish to the same canonical one.
+        for id in channelIDs {
+            try checkImportedSyncAccount(expectedAccountID, client: client)
+            guard try await validateImportedSyncChannel(id, ownerID: me.id, client: client) else {
+                throw ImportedPlaylistSyncError.unsafeChannel
+            }
+        }
+        return ImportedPlaylistSyncLocation(ownerUserID: me.id, chatIDs: channelIDs.sorted(), uploadChatID: channelIDs.sorted()[0])
+    }
+
+    func pullImportedPlaylistSync(chatID: Int64, after messageID: Int64, ownerID: Int64,
+                                  expectedAccountID: String) async throws -> ImportedPlaylistSyncPull {
+        let client = try await requireReadyClient()
+        try checkImportedSyncAccount(expectedAccountID, client: client)
+        guard try await validateImportedSyncChannel(chatID, ownerID: ownerID, client: client) else {
+            throw ImportedPlaylistSyncError.unsafeChannel
+        }
+        var from: Int64 = 0
+        var seen: Set<Int64> = []
+        var newest = messageID
+        var records: [ImportedPlaylistSyncRecord] = []
+        while true {
+            try checkImportedSyncAccount(expectedAccountID, client: client)
+            let page = try await client.getChatHistory(chatId: chatID, fromMessageId: from, limit: 100, offset: 0, onlyLocal: false)
+            let messages = (page.messages ?? []).filter { $0.id > messageID && seen.insert($0.id).inserted }
+            if messages.isEmpty { break }
+            for message in messages where message.sendingState == nil {
+                newest = max(newest, message.id)
+                guard case let .messageDocument(content) = message.content,
+                      content.caption.text.hasPrefix(ImportedPlaylistSyncEnvelope.marker + " "),
+                      content.document.fileName.hasPrefix("telisten-playlist-sync-") else { continue }
+                let file = content.document.document
+                guard max(file.size, file.expectedSize) <= Int64(ImportedPlaylistSyncEnvelope.maximumBytes) else {
+                    throw ImportedPlaylistSyncError.tooLarge
+                }
+                let local = try await client.downloadFile(fileId: file.id,
+                    limit: Int64(ImportedPlaylistSyncEnvelope.maximumBytes + 1), offset: 0, priority: 16, synchronous: true)
+                try checkImportedSyncAccount(expectedAccountID, client: client)
+                guard !local.local.path.isEmpty else { throw ServiceError.incompleteDownload }
+                let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: local.local.path))
+                let data: Data
+                do {
+                    defer { try? handle.close() }
+                    data = try handle.read(upToCount: ImportedPlaylistSyncEnvelope.maximumBytes + 1) ?? Data()
+                }
+                guard local.local.isDownloadingCompleted else { throw ServiceError.incompleteDownload }
+                let envelope = try ImportedPlaylistSyncEnvelope.decode(data, ownerUserID: ownerID)
+                guard content.caption.text == "\(ImportedPlaylistSyncEnvelope.marker) \(envelope.id)" else {
+                    throw ImportedPlaylistSyncError.invalidData
+                }
+                records.append(contentsOf: envelope.records)
+            }
+            guard let oldest = messages.map(\.id).min(), oldest > messageID else { break }
+            from = oldest
+        }
+        return ImportedPlaylistSyncPull(records: records, lastMessageID: newest)
+    }
+
+    func pushImportedPlaylistSync(_ envelope: ImportedPlaylistSyncEnvelope, chatID: Int64,
+                                  expectedAccountID: String) async throws {
+        let client = try await requireReadyClient()
+        try checkImportedSyncAccount(expectedAccountID, client: client)
+        guard try await validateImportedSyncChannel(chatID, ownerID: envelope.ownerUserID, client: client) else {
+            throw ImportedPlaylistSyncError.unsafeChannel
+        }
+        let data = try envelope.encoded()
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("telisten-playlist-sync-\(envelope.id).json")
+        try data.write(to: url, options: .atomic)
+        var confirmed = false
+        defer { if confirmed { try? FileManager.default.removeItem(at: url) } }
+        let caption = "\(ImportedPlaylistSyncEnvelope.marker) \(envelope.id)"
+        _ = try await sendImportedSyncMessage(.inputMessageDocument(InputMessageDocument(
+            caption: FormattedText(entities: [], text: caption), document: InputDocument(disableContentTypeDetection: true,
+                document: .inputFileLocal(InputFileLocal(path: url.path)), thumbnail: nil))),
+            caption: caption, chatID: chatID, expectedAccountID: expectedAccountID, client: client)
+        confirmed = true
+    }
+
+    func restoreImportedAudioSource(_ source: ImportedAudioSource, expectedAccountID: String) async throws -> Track? {
+        let client = try await requireReadyClient()
+        try checkImportedSyncAccount(expectedAccountID, client: client)
+        guard let chatID = Int64(source.chatID) else { return nil }
+        let message: Message
+        do { message = try await client.getMessage(chatId: chatID, messageId: source.messageID) }
+        catch let error as TDLibKit.Error where error.code == 400 || error.code == 404 { return nil }
+        try checkImportedSyncAccount(expectedAccountID, client: client)
+        guard let track = TelegramMapping.track(from: message),
+              source.remoteUniqueID == nil || source.remoteUniqueID == track.remoteUniqueID else { return nil }
+        return track
+    }
+
+    private func importedSyncChannelDescription(_ ownerID: Int64) -> String {
+        "Telisten imported playlist sync v1\nowner:\(ownerID)"
+    }
+
+    private func validateImportedSyncChannel(_ chatID: Int64, ownerID: Int64, client: TDLibClient) async throws -> Bool {
+        let chat = try await client.getChat(chatId: chatID)
+        guard case let .chatTypeSupergroup(type) = chat.type, type.isChannel else { return false }
+        let group = try await client.getSupergroup(supergroupId: type.supergroupId)
+        guard case let .chatMemberStatusCreator(status) = group.status, status.isMember,
+              group.usernames?.activeUsernames.isEmpty ?? true else { return false }
+        let full = try await client.getSupergroupFullInfo(supergroupId: type.supergroupId)
+        return full.description == importedSyncChannelDescription(ownerID) && full.memberCount == 1 && full.linkedChatId == 0
+    }
+
+    private func checkImportedSyncAccount(_ expected: String, client: TDLibClient) throws {
+        try Task.checkCancellation()
+        guard accountID == expected, self.client?.id == client.id else { throw ImportedPlaylistSyncError.accountChanged }
+    }
+
+    private func sendImportedSyncMessage(_ input: sending InputMessageContent, caption: String, chatID: Int64,
+                                         expectedAccountID: String, client: TDLibClient) async throws -> Message {
+        try checkImportedSyncAccount(expectedAccountID, client: client)
+        let sent = try await client.sendMessage(chatId: chatID, inputMessageContent: input,
+            options: nil, replyMarkup: nil, replyTo: nil, topicId: nil)
+        if sent.sendingState == nil { return sent }
+        // sendMessage often returns a temporary local ID before upload finishes.
+        // Never remove outbox changes until a confirmed server message is seen.
+        let deadline = Foundation.Date().addingTimeInterval(45)
+        while Foundation.Date() < deadline {
+            try checkImportedSyncAccount(expectedAccountID, client: client)
+            let page = try await client.getChatHistory(chatId: chatID, fromMessageId: 0, limit: 100, offset: 0, onlyLocal: false)
+            for message in page.messages ?? [] where TelegramMapping.text(from: message) == caption {
+                if message.sendingState == nil { return message }
+                if case let .messageSendingStateFailed(failure) = message.sendingState {
+                    throw ServiceError.telegram(failure.error.message)
+                }
+            }
+            try await Task.sleep(for: .seconds(1))
+        }
+        throw ImportedPlaylistSyncError.sendUnconfirmed
+    }
+
     func cachedSearchBot(chatID: String) -> MusicChat? {
         searchBotPeers.values.first { $0.id == chatID }
     }

@@ -156,6 +156,9 @@
 		F7BE53861D9F895341BCB954 /* ImportedPlaylistsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 680157E6AD0AA9EB8DA46AFF /* ImportedPlaylistsView.swift */; };
 		3F288074D46F49E0E2159A54 /* ImportedPlaylistsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 680157E6AD0AA9EB8DA46AFF /* ImportedPlaylistsView.swift */; };
 		0E743A29AB366A933FDBA7A2 /* ImportedPlaylistsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 680157E6AD0AA9EB8DA46AFF /* ImportedPlaylistsView.swift */; };
+		998FF71329FBD1A6C33B1029 /* ImportedPlaylistSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A9D9F4DEEB16F25258EF8DA /* ImportedPlaylistSync.swift */; };
+		38C38BC8D95DB8A2E574DA3D /* ImportedPlaylistSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A9D9F4DEEB16F25258EF8DA /* ImportedPlaylistSync.swift */; };
+		D6EA8D8EFED8D03873CE826C /* ImportedPlaylistSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A9D9F4DEEB16F25258EF8DA /* ImportedPlaylistSync.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -224,6 +227,7 @@
 		2077D9682CE18FBC7C5C66DB /* ImportedPlaylist.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportedPlaylist.swift; sourceTree = "<group>"; };
 		9EDD150392376B8A049F1C4B /* ImportedPlaylistStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportedPlaylistStore.swift; sourceTree = "<group>"; };
 		680157E6AD0AA9EB8DA46AFF /* ImportedPlaylistsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportedPlaylistsView.swift; sourceTree = "<group>"; };
+		6A9D9F4DEEB16F25258EF8DA /* ImportedPlaylistSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportedPlaylistSync.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -331,6 +335,7 @@
 		7D7579E3BDFEC0239D9EEF56 /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				6A9D9F4DEEB16F25258EF8DA /* ImportedPlaylistSync.swift */,
 				2077D9682CE18FBC7C5C66DB /* ImportedPlaylist.swift */,
 				EF592DBE118E4B69B72E4893 /* TelegramProxyConfiguration.swift */,
 				3B214D9DE7975166D4F2CF90 /* VideoModels.swift */,
@@ -613,6 +618,7 @@
 				0454A092D39A0C796E147CDF /* LyricsService.swift in Sources */,
 				C1EDF29C62AB9979FF0207E5 /* Models.swift in Sources */,
 				812A8273413E9084F48E7D03 /* ImportedPlaylist.swift in Sources */,
+				998FF71329FBD1A6C33B1029 /* ImportedPlaylistSync.swift in Sources */,
 				F5FBAD1AD47AB85D7BA175E3 /* NowPlayingView.swift in Sources */,
 				3A29476A02CCF909B8EC64A7 /* PlayerBar.swift in Sources */,
 				1F0229A46090416F1BF80B20 /* PlaylistSheet.swift in Sources */,
@@ -661,6 +667,7 @@
 				B3586F938EC1C2591B81F3A3 /* LyricsService.swift in Sources */,
 				C8F83E416B089DCA714ECCD9 /* Models.swift in Sources */,
 				50E004D679FD9446AF3350B2 /* ImportedPlaylist.swift in Sources */,
+				38C38BC8D95DB8A2E574DA3D /* ImportedPlaylistSync.swift in Sources */,
 				E2CF4F1B8816CDE448E6EB60 /* NowPlayingView.swift in Sources */,
 				101547991F3AFCE033F7F908 /* PlayerBar.swift in Sources */,
 				C1E2325A63E4FF5B360853E0 /* PlaylistSheet.swift in Sources */,
@@ -709,6 +716,7 @@
 				33FBFEB23C223FAA41A29551 /* LyricsService.swift in Sources */,
 				CF793513AAC64E44DCF6FEC8 /* Models.swift in Sources */,
 				5C9BC5B36DBE1148BAF1993F /* ImportedPlaylist.swift in Sources */,
+				D6EA8D8EFED8D03873CE826C /* ImportedPlaylistSync.swift in Sources */,
 				98AC519455918D7BADDC8114 /* NowPlayingView.swift in Sources */,
 				0B288CDE9885C846CF935C15 /* PlayerBar.swift in Sources */,
 				BE4E8B2039D2EF7B585E0CE2 /* PlaylistSheet.swift in Sources */,
