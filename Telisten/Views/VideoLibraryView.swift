@@ -124,28 +124,52 @@ struct VideoLibraryView: View {
     }
 }
 
-struct VideoConnectionStatusView: View {
-    let service: TelegramService
-    @State private var state = "unknown"
+enum TelegramConnectionStatus: String {
+    case ready = "connectionStateReady"
+    case waitingForNetwork = "connectionStateWaitingForNetwork"
+    case connectingToProxy = "connectionStateConnectingToProxy"
+    case updating = "connectionStateUpdating"
+    case connecting
 
-    private var message: LocalizedStringKey {
-        switch state {
-        case "connectionStateReady": return "Connected to Telegram"
-        case "connectionStateWaitingForNetwork": return "Waiting for network…"
-        case "connectionStateConnectingToProxy": return "Connecting to proxy…"
-        case "connectionStateUpdating": return "Updating Telegram…"
-        default: return "Connecting to Telegram…"
+    var message: LocalizedStringKey {
+        switch self {
+        case .ready: return "Connected to Telegram"
+        case .waitingForNetwork: return "Waiting for network…"
+        case .connectingToProxy: return "Connecting to proxy…"
+        case .updating: return "Updating Telegram…"
+        case .connecting: return "Connecting to Telegram…"
         }
     }
 
+    var symbol: String {
+        switch self {
+        case .ready: return "circle.fill"
+        case .waitingForNetwork: return "exclamationmark.circle.fill"
+        default: return "arrow.clockwise.circle.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .ready: return .green
+        case .waitingForNetwork: return .orange
+        default: return .secondary
+        }
+    }
+}
+
+struct VideoConnectionStatusView: View {
+    let service: TelegramService
+    @State private var status = TelegramConnectionStatus.connecting
+
     var body: some View {
         HStack(spacing: 6) {
-            if state == "connectionStateReady" {
+            if status == .ready {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
             } else {
                 ProgressView().controlSize(.small)
             }
-            Text(message).font(.caption).foregroundStyle(.secondary)
+            Text(status.message).font(.caption).foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .combine)
         .task {
@@ -153,7 +177,7 @@ struct VideoConnectionStatusView: View {
             let updates = await service.connectionStateUpdates()
             for await value in updates {
                 guard !Task.isCancelled else { return }
-                state = value
+                status = TelegramConnectionStatus(rawValue: value) ?? .connecting
             }
         }
     }

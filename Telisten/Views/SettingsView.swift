@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @AppStorage(AppAppearance.storageKey) private var appearance = AppAppearance.system
+    @AppStorage(AppLanguage.storageKey) private var language = AppLanguage.system
     @AppStorage("video.enabled") private var videoEnabled = false
     @AppStorage("video.prefer1080p") private var prefer1080p = true
     @ObservedObject var model: AppModel
@@ -25,165 +27,34 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Network") {
-                    Button("Telegram proxy") { isShowingProxySettings = true }
-                }
-                .sheet(isPresented: $isShowingProxySettings) {
-                    TelegramProxySettingsView(controller: model.proxyController)
-                        .allowsApplicationTermination()
+                Section("Appearance") {
+                    Picker("Theme", selection: $appearance) {
+                        Text("Follow system").tag(AppAppearance.system)
+                        Text("Day mode").tag(AppAppearance.light)
+                        Text("Night mode").tag(AppAppearance.dark)
+                    }
+                    Picker("Language", selection: $language) {
+                        Text("Follow system").tag(AppLanguage.system)
+                        ForEach(AppLanguage.allCases.filter { $0 != .system }, id: \.self) { option in
+                            Text(verbatim: option.nativeName).tag(option)
+                        }
+                    }
                 }
                 Section("Library") {
                     Toggle("Show chats on homepage", isOn: $model.showChats)
-                    Text("Telegram chats containing music appear below playlists when enabled.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    NavigationLink("Playlist folder") { playlistFolderSettings }
+                    NavigationLink("Bot search") { searchBotSettings }
                 }
-                Section("Videos") {
-                    Toggle("Enable video playback", isOn: $videoEnabled)
-                    if videoEnabled {
-                        Toggle("Prefer 1080P from comments", isOn: $prefer1080p)
-                        Text("Choose a Telegram folder in Videos. Matching 1080P replies are preferred; otherwise the original video is used.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Text("Videos buffer on demand in Telegram storage and do not use the music offline cache.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Button("Clear video buffers") {
-                            isClearingVideoBuffers = true
-                            Task {
-                                await model.clearVideoBuffers()
-                                isClearingVideoBuffers = false
-                            }
-                        }
-                        .disabled(isClearingVideoBuffers)
-                    }
-                }
-                #if os(iOS)
-                Section("Diagnostics") {
-                    Button {
-                        isExportingLogs = true
-                        logExportError = nil
-                        Task {
-                            defer { isExportingLogs = false }
-                            do {
-                                exportedLogsURL = try await PlaybackDiagnostics.exportLogs()
-                                isSharingLogs = true
-                            } catch { logExportError = UserFacingError.message(for: error) }
-                        }
+                Section("Playback") {
+                    NavigationLink("Videos") { videoSettings }
+                    NavigationLink {
+                        offlineCacheSettings
                     } label: {
-                        Label("Export logs", systemImage: "square.and.arrow.up")
-                    }
-                    .disabled(isExportingLogs)
-                    if isExportingLogs { ProgressView() }
-                    if let logExportError {
-                        Text(logExportError).font(.caption).foregroundStyle(.red)
-                    }
-                }
-                #endif
-                Section("Offline cache") {
-                    LabeledContent("Used", value: DisplayFormat.fileSize(model.cacheBytes))
-                    Picker("Maximum", selection: cacheLimit) {
-                        ForEach(CacheLimits.options, id: \.self) { bytes in
-                            Text(DisplayFormat.fileSize(bytes)).tag(bytes)
-                        }
-                    }
-                    Text("Partial streams resume from disk. Oldest cached music is removed when this limit is reached.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if isRefreshingCache {
-                        ProgressView("Loading cached audio…")
-                    } else if model.cachedAudioItems.isEmpty {
-                        Text("No cached audio.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ScrollView {
-                            LazyVStack(spacing: 0) {
-                                ForEach(model.cachedAudioItems) { item in
-                                    cachedAudioRow(item)
-                                        .padding(.vertical, 6)
-                                    Divider()
-                                }
-                            }
-                        }
-                        .frame(maxHeight: 320)
-                        Button("Clear all", systemImage: "trash", role: .destructive) {
-                            isConfirmingClearCache = true
-                        }
-                        .disabled(model.isCacheManagementBusy)
+                        LabeledContent("Offline cache") { cacheSize }
                     }
                 }
                 Section {
-                    TextField("Playlist folder name", text: $playlistFolderDraft)
-                        .autocorrectionDisabled()
-                        #if os(iOS) || os(visionOS)
-                        .textInputAutocapitalization(.never)
-                        #endif
-                        .onSubmit { applyPlaylistFolder() }
-                    Button("Apply folder") { applyPlaylistFolder() }
-                        .disabled(model.isSavingToPlaylist)
-                    Button("Use _Playlist default") {
-                        playlistFolderDraft = PlaylistFolderConfiguration.defaultName
-                        applyPlaylistFolder()
-                    }
-                    .disabled(model.isSavingToPlaylist)
-                    if let playlistFolderError {
-                        Text(localizedUI(playlistFolderError)).font(.caption).foregroundStyle(.red)
-                    }
-                } header: {
-                    Text("Playlist folder")
-                } footer: {
-                    Text("Use a Telegram folder with this exact name for this account. New playlists go here. Existing folders are not renamed. 1–12 characters.")
-                }
-                Section {
-                    TextField("https://lrclib.net", text: $lyricsServerDraft)
-                        .autocorrectionDisabled()
-                        #if os(iOS) || os(visionOS)
-                        .textContentType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .keyboardType(.URL)
-                        #endif
-                        .onSubmit { applyLyricsServer() }
-
-                    Button("Apply server") { applyLyricsServer() }
-                        .disabled(isApplyingLyricsServer || lyricsServerDraft.isEmpty)
-
-                    Button("Use LRCLIB default") {
-                        lyricsServerDraft = LyricsServerConfiguration.defaultAddress
-                        applyLyricsServer()
-                    }
-                    .disabled(isApplyingLyricsServer || model.lyricsServerURL == LyricsServerConfiguration.defaultURL)
-
-                    if let lyricsServerError {
-                        Label(localizedUI(lyricsServerError), systemImage: "exclamationmark.circle")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-                } header: {
-                    Text("Lyrics server")
-                } footer: {
-                    Text("Use the base URL of an LRCLIB-compatible server. Telisten requests /api/get and /api/search; cached lyrics stay available offline.")
-                }
-                Section {
-                    ForEach(model.searchBots) { config in
-                        searchBotRow(config)
-                    }
-                    .onDelete { offsets in
-                        let ids = offsets.compactMap { index in
-                            model.searchBots.indices.contains(index) ? model.searchBots[index].id : nil
-                        }
-                        for id in ids { model.deleteSearchBot(id: id) }
-                    }
-                    .onMove(perform: model.moveSearchBots)
-
-                    Button {
-                        editingSearchBot = SearchBotConfig(botName: "")
-                    } label: {
-                        Label("Add search bot", systemImage: "plus")
-                    }
-                } header: {
-                    Text("Bot search")
-                } footer: {
-                    Text("Search bot configurations are stored in iCloud Keychain. No bot is included by default.")
-                }
-                Section {
+                    NavigationLink("Advanced") { advancedSettings }
                     Link(destination: URL(string: "https://t.me/telisten")!) {
                         Label("Telisten on Telegram", systemImage: "paperplane")
                     }
@@ -195,47 +66,24 @@ struct SettingsView: View {
                             dismiss()
                         }
                     }
+                } header: {
+                    Text("Account")
                 } footer: {
                     Text("Signing out removes this account's Telegram session data. Other accounts stay signed in.")
                 }
             }
             .formStyle(.grouped)
             .navigationTitle("Settings")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
-                #if os(iOS) || os(visionOS)
-                if model.searchBots.count > 1 {
-                    ToolbarItem(placement: .primaryAction) { EditButton() }
-                }
-                #endif
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-            }
-            .confirmationDialog(
-                "Clear offline cache?",
-                isPresented: $isConfirmingClearCache,
-                titleVisibility: .visible
-            ) {
-                Button("Clear all cached audio", role: .destructive) {
-                    model.clearOfflineCache()
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Cached audio for active playback or downloads will be kept.")
             }
         }
         #if os(macOS)
         .frame(minWidth: 360, minHeight: 360)
         #endif
-        .task {
-            isRefreshingCache = true
-            lyricsServerDraft = model.lyricsServerURL.absoluteString
-            playlistFolderDraft = model.playlistFolderName
-            await model.refreshCacheUsage()
-            isRefreshingCache = false
-        }
-        .sheet(item: $editingSearchBot) { config in
-            SearchBotEditorView(model: model, config: config)
-                .allowsApplicationTermination()
-        }
         #if os(iOS)
         .sheet(isPresented: $isSharingLogs, onDismiss: {
             // Keep the snapshot available until the share sheet is dismissed.
@@ -247,11 +95,225 @@ struct SettingsView: View {
         #endif
     }
 
+    private func settingsPage<Content: View>(_ title: LocalizedStringKey, @ViewBuilder content: () -> Content) -> some View {
+        Form(content: content)
+            .formStyle(.grouped)
+            .navigationTitle(title)
+    }
+
+    private var playlistFolderSettings: some View {
+        settingsPage("Playlist folder") {
+            Section {
+                TextField("Playlist folder name", text: $playlistFolderDraft)
+                    .autocorrectionDisabled()
+                    #if os(iOS) || os(visionOS)
+                    .textInputAutocapitalization(.never)
+                    #endif
+                    .onSubmit { applyPlaylistFolder() }
+                Button("Apply folder") { applyPlaylistFolder() }
+                    .disabled(model.isSavingToPlaylist)
+                Button("Use _Playlist default") {
+                    playlistFolderDraft = PlaylistFolderConfiguration.defaultName
+                    applyPlaylistFolder()
+                }
+                .disabled(model.isSavingToPlaylist)
+                if let playlistFolderError {
+                    Text(localizedUI(playlistFolderError)).font(.caption).foregroundStyle(.red)
+                }
+            } footer: {
+                Text("Use a Telegram folder with this exact name for this account. New playlists go here. Existing folders are not renamed. 1–12 characters.")
+            }
+        }
+        .onAppear {
+            playlistFolderDraft = model.playlistFolderName
+            playlistFolderError = nil
+        }
+    }
+
+    private var searchBotSettings: some View {
+        settingsPage("Bot search") {
+            Section {
+                ForEach(model.searchBots) { config in
+                    searchBotRow(config)
+                }
+                .onDelete { offsets in
+                    let ids = offsets.compactMap { index in
+                        model.searchBots.indices.contains(index) ? model.searchBots[index].id : nil
+                    }
+                    for id in ids { model.deleteSearchBot(id: id) }
+                }
+                .onMove(perform: model.moveSearchBots)
+
+                Button {
+                    editingSearchBot = SearchBotConfig(botName: "")
+                } label: {
+                    Label("Add search bot", systemImage: "plus")
+                }
+            } footer: {
+                Text("Search bot configurations are stored in iCloud Keychain. No bot is included by default.")
+            }
+        }
+        #if os(iOS) || os(visionOS)
+        .toolbar {
+            if model.searchBots.count > 1 {
+                ToolbarItem(placement: .primaryAction) { EditButton() }
+            }
+        }
+        #endif
+        .sheet(item: $editingSearchBot) { config in
+            SearchBotEditorView(model: model, config: config)
+                .allowsApplicationTermination()
+        }
+    }
+
+    private var videoSettings: some View {
+        settingsPage("Videos") {
+            Section {
+                Toggle("Enable video playback", isOn: $videoEnabled)
+                if videoEnabled {
+                    Toggle("Prefer 1080P from comments", isOn: $prefer1080p)
+                    Text("Choose a Telegram folder in Videos. Matching 1080P replies are preferred; otherwise the original video is used.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("Videos buffer on demand in Telegram storage and do not use the music offline cache.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Clear video buffers") {
+                        isClearingVideoBuffers = true
+                        Task {
+                            await model.clearVideoBuffers()
+                            isClearingVideoBuffers = false
+                        }
+                    }
+                    .disabled(isClearingVideoBuffers)
+                }
+            }
+        }
+    }
+
+    private var offlineCacheSettings: some View {
+        settingsPage("Offline cache") {
+            Section {
+                LabeledContent("Used") { cacheSize }
+                Picker("Maximum", selection: cacheLimit) {
+                    ForEach(CacheLimits.options, id: \.self) { bytes in
+                        Text(DisplayFormat.fileSize(bytes)).tag(bytes)
+                    }
+                }
+            } footer: {
+                Text("Partial streams resume from disk. Oldest cached music is removed when this limit is reached.")
+            }
+            Section {
+                if isRefreshingCache {
+                    ProgressView("Loading cached audio…")
+                } else if model.cachedAudioItems.isEmpty {
+                    Text("No cached audio.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(model.cachedAudioItems) { item in
+                        cachedAudioRow(item)
+                    }
+                    Button("Clear all", systemImage: "trash", role: .destructive) {
+                        isConfirmingClearCache = true
+                    }
+                    .disabled(model.isCacheManagementBusy)
+                }
+            }
+        }
+        .task {
+            // Fetch the full cache inventory when its page is opened.
+            isRefreshingCache = true
+            await model.refreshCacheUsage()
+            if !Task.isCancelled { isRefreshingCache = false }
+        }
+        .confirmationDialog(
+            "Clear offline cache?",
+            isPresented: $isConfirmingClearCache,
+            titleVisibility: .visible
+        ) {
+            Button("Clear all cached audio", role: .destructive) {
+                model.clearOfflineCache()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Cached audio for active playback or downloads will be kept.")
+        }
+    }
+
+    private var advancedSettings: some View {
+        settingsPage("Advanced") {
+            Section("Network") {
+                Button("Telegram proxy") { isShowingProxySettings = true }
+            }
+            .sheet(isPresented: $isShowingProxySettings) {
+                TelegramProxySettingsView(controller: model.proxyController)
+                    .allowsApplicationTermination()
+            }
+            Section {
+                TextField("https://lrclib.net", text: $lyricsServerDraft)
+                    .autocorrectionDisabled()
+                    #if os(iOS) || os(visionOS)
+                    .textContentType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+                    #endif
+                    .onSubmit { applyLyricsServer() }
+
+                Button("Apply server") { applyLyricsServer() }
+                    .disabled(isApplyingLyricsServer || lyricsServerDraft.isEmpty)
+
+                Button("Use LRCLIB default") {
+                    lyricsServerDraft = LyricsServerConfiguration.defaultAddress
+                    applyLyricsServer()
+                }
+                .disabled(isApplyingLyricsServer || model.lyricsServerURL == LyricsServerConfiguration.defaultURL)
+
+                if let lyricsServerError {
+                    Label(localizedUI(lyricsServerError), systemImage: "exclamationmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            } header: {
+                Text("Lyrics server")
+            } footer: {
+                Text("Use the base URL of an LRCLIB-compatible server. Telisten requests /api/get and /api/search; cached lyrics stay available offline.")
+            }
+            #if os(iOS)
+            Section("Diagnostics") {
+                Button {
+                    isExportingLogs = true
+                    logExportError = nil
+                    Task {
+                        defer { isExportingLogs = false }
+                        do {
+                            exportedLogsURL = try await PlaybackDiagnostics.exportLogs()
+                            isSharingLogs = true
+                        } catch { logExportError = UserFacingError.message(for: error) }
+                    }
+                } label: {
+                    Label("Export logs", systemImage: "square.and.arrow.up")
+                }
+                .disabled(isExportingLogs)
+                if isExportingLogs { ProgressView() }
+                if let logExportError {
+                    Text(logExportError).font(.caption).foregroundStyle(.red)
+                }
+            }
+            #endif
+        }
+        .onAppear {
+            lyricsServerDraft = model.lyricsServerURL.absoluteString
+            lyricsServerError = nil
+        }
+    }
+
     private var cacheLimit: Binding<Int64> {
         Binding(
             get: { model.cacheLimitBytes },
             set: { model.setCacheLimit($0) }
         )
+    }
+
+    private var cacheSize: Text {
+        Text(model.cacheBytes, format: .byteCount(style: .file, allowedUnits: [.kb, .mb, .gb], spellsOutZero: false))
     }
 
     private func cachedAudioRow(_ item: CachedAudioItem) -> some View {

@@ -1,8 +1,25 @@
 import SwiftUI
 
+enum AppAppearance: String {
+    static let storageKey = "app.appearance"
+
+    case system, light, dark
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+}
+
 @main
 struct TelistenApp: App {
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.locale) private var locale
+    @AppStorage(AppAppearance.storageKey) private var appearance = AppAppearance.system
+    @AppStorage(AppLanguage.storageKey) private var language = AppLanguage.system
     @StateObject private var model = AppModel()
     @State private var startupTask: Task<Void, Never>?
     #if os(macOS)
@@ -12,6 +29,8 @@ struct TelistenApp: App {
     var body: some Scene {
         WindowGroup(id: "library") {
             RootView(model: model)
+                .environment(\.locale, language.locale ?? locale)
+                .preferredColorScheme(appearance.colorScheme)
                 #if os(macOS)
                 .environment(\.openLyricsWindow, { LyricsWindow.open(model: model) })
                 #endif
@@ -39,25 +58,26 @@ struct TelistenApp: App {
         #if os(macOS)
         .defaultSize(width: 1_080, height: 720)
         .commands {
-            CommandMenu("Playback") {
-                Button(model.player.isPlaying ? "Pause" : "Play") { model.player.toggle() }
+            CommandMenu(language.localized("Playback")) {
+                Button(language.localized(model.player.isPlaying ? "Pause" : "Play")) { model.player.toggle() }
                     .keyboardShortcut(.space, modifiers: [])
-                Button("Previous") { model.previous() }
+                Button(language.localized("Previous")) { model.previous() }
                     .keyboardShortcut(.leftArrow, modifiers: [.command])
-                Button("Next") { model.next() }
+                Button(language.localized("Next")) { model.next() }
                     .keyboardShortcut(.rightArrow, modifiers: [.command])
                 Divider()
                 OpenLyricsWindowButton()
+                    .environment(\.locale, language.locale ?? locale)
                     .environment(\.openLyricsWindow, { LyricsWindow.open(model: model) })
                     .keyboardShortcut("l", modifiers: [.command, .shift])
-                Toggle("Lock Floating Lyrics", isOn: $lyricsLocked)
+                Toggle(language.localized("Lock Floating Lyrics"), isOn: $lyricsLocked)
             }
         }
         #endif
 
         #if os(visionOS)
         // A stable value brings the existing lyrics window forward on repeated opens.
-        WindowGroup("Floating Lyrics", id: LyricsWindow.id, for: String.self) { _ in
+        WindowGroup(language.localized("Floating Lyrics"), id: LyricsWindow.id, for: String.self) { _ in
             FloatingLyricsView(model: model)
                 .task { await startIfNeeded() }
         } defaultValue: {

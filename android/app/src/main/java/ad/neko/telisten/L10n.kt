@@ -2,9 +2,19 @@ package ad.neko.telisten
 
 import android.content.Context
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 
 private fun stringId(key: String): Int? = when (key) {
+    "Appearance" -> R.string.l10n_appearance
+    "Day mode" -> R.string.l10n_day_mode
+    "Follow system" -> R.string.l10n_follow_system
+    "Language" -> R.string.l10n_language
+    "Night mode" -> R.string.l10n_night_mode
+    "Theme" -> R.string.l10n_theme
     "%s used" -> R.string.l10n_s_used_ea8ce9d
     "1–12 characters. Uses this exact Telegram folder name for this account. Existing folders are not renamed." -> R.string.l10n_1_12_characters_uses_this_exact_telegram_6a9c019
     "Accounts" -> R.string.l10n_accounts_36bae31
@@ -215,12 +225,28 @@ private fun stringId(key: String): Int? = when (key) {
 }
 
 fun localize(context: Context, key: String, vararg args: Any): String {
+    return localizedString(context.savedAppLanguage().localizedContext(context), key, args)
+}
+
+private fun localizedString(context: Context, key: String, args: Array<out Any>): String {
     val id = stringId(key) ?: return key
     return if (args.isEmpty()) context.getString(id) else context.getString(id, *args)
 }
 
 @Composable
-fun tr(key: String, vararg args: Any): String = localize(LocalContext.current, key, *args)
+fun tr(key: String, vararg args: Any): String =
+    localizedString(LocalAppResourceContext.current ?: LocalContext.current, key, args)
+
+private val LocalAppResourceContext = compositionLocalOf<Context?> { null }
+
+@Composable
+internal fun ProvideAppLocalization(content: @Composable () -> Unit) {
+    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val language = LocalAppPreferences.current.language
+    val resourceContext = remember(context, configuration, language) { language.localizedContext(context) }
+    CompositionLocalProvider(LocalAppResourceContext provides resourceContext, content = content)
+}
 
 @Composable
 fun countLabel(kind: String, count: Int): String {
@@ -231,5 +257,6 @@ fun countLabel(kind: String, count: Int): String {
         "contacts" -> R.plurals.l10n_count_contacts
         else -> return "$count $kind"
     }
-    return LocalContext.current.resources.getQuantityString(id, count, count)
+    val context = LocalAppResourceContext.current ?: LocalContext.current
+    return context.resources.getQuantityString(id, count, count)
 }

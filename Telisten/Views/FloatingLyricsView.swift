@@ -25,7 +25,7 @@ enum LyricsWindow {
             backing: .buffered,
             defer: false
         )
-        panel.title = String(localized: "Floating Lyrics")
+        panel.title = localizedUI("Floating Lyrics")
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
         panel.isFloatingPanel = true
@@ -76,6 +76,8 @@ struct OpenLyricsWindowButton: View {
 
 struct FloatingLyricsView: View {
     @ObservedObject var model: AppModel
+    @AppStorage(AppLanguage.storageKey) private var language = AppLanguage.system
+    @Environment(\.locale) private var locale
     private var preferences = FloatingLyricsPreferences()
 #if os(visionOS)
     @Environment(\.dismissWindow) private var dismissWindow
@@ -160,6 +162,7 @@ struct FloatingLyricsView: View {
         }
         .preferredColorScheme(.dark)
         .navigationTitle("Floating Lyrics")
+        .environment(\.locale, language.locale ?? locale)
         #if os(macOS)
         .ignoresSafeArea()
         .background(Color.clear)

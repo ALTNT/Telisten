@@ -40,6 +40,9 @@ import androidx.compose.ui.text.input.*
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import ad.neko.telisten.AppAppearance
+import ad.neko.telisten.AppLanguage
+import ad.neko.telisten.LocalAppPreferences
 import ad.neko.telisten.tr
 import ad.neko.telisten.countLabel
 import ad.neko.telisten.data.*
@@ -541,6 +544,7 @@ import org.drinkless.tdlib.TdApi as T
 }
 @Composable private fun Settings(model: AppModel) {
     val uriHandler = LocalUriHandler.current
+    val preferences = LocalAppPreferences.current
     var server by rememberSaveable { mutableStateOf(model.lyricsServer) }
     var folderName by rememberSaveable(model.app.activeId) { mutableStateOf(model.playlistFolderName) }
     var limit by rememberSaveable { mutableLongStateOf(model.cacheLimit) }
@@ -548,6 +552,38 @@ import org.drinkless.tdlib.TdApi as T
     var signOut by remember { mutableStateOf(false) }
     LazyColumn(Modifier.fillMaxHeight(.9f), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item { Text(tr("Settings"), style = MaterialTheme.typography.titleLarge) }
+        item { SectionTitle("Appearance", "") }
+        item {
+            Text(tr("Theme"), style = MaterialTheme.typography.bodyMedium)
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AppAppearance.entries.forEach { option ->
+                    FilterChip(preferences.appearance == option, { preferences.selectAppearance(option) }, label = { Text(tr(option.label)) })
+                }
+            }
+        }
+        item {
+            var expanded by remember { mutableStateOf(false) }
+            val language = preferences.language
+            Text(tr("Language"), style = MaterialTheme.typography.bodyMedium)
+            Box {
+                OutlinedButton({ expanded = true }) {
+                    Text(if (language == AppLanguage.SYSTEM) tr("Follow system") else language.nativeName)
+                    Icon(Icons.Rounded.ArrowDropDown, null)
+                }
+                DropdownMenu(expanded, { expanded = false }) {
+                    AppLanguage.entries.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(if (option == AppLanguage.SYSTEM) tr("Follow system") else option.nativeName) },
+                            onClick = {
+                                preferences.selectLanguage(option)
+                                expanded = false
+                            },
+                            trailingIcon = { if (option == language) Icon(Icons.Rounded.Check, null) },
+                        )
+                    }
+                }
+            }
+        }
         item { SectionTitle("Accounts", "") }
         items(model.accounts, key = { it.id }) { account ->
             FilledTonalButton({ model.switchAccount(account.id) }, Modifier.fillMaxWidth(), enabled = !model.busy && account.id != model.app.activeId) { Icon(Icons.Rounded.AccountCircle, null); Spacer(Modifier.width(12.dp)); Text(account.name); if (account.id == model.app.activeId) { Spacer(Modifier.width(8.dp)); Icon(Icons.Rounded.Check, null) } }

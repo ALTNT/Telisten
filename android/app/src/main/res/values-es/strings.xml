@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="l10n_appearance">Apariencia</string>
+    <string name="l10n_theme">Tema</string>
+    <string name="l10n_follow_system">Según el sistema</string>
+    <string name="l10n_day_mode">Modo claro</string>
+    <string name="l10n_night_mode">Modo oscuro</string>
+    <string name="l10n_language">Idioma</string>
     <string name="l10n_s_used_ea8ce9d">%s usados</string>
     <string name="l10n_1_12_characters_uses_this_exact_telegram_6a9c019" formatted="false">1 a 12 caracteres. Utiliza este nombre exacto de carpeta de Telegram para esta cuenta. No se cambia el nombre de las carpetas existentes.</string>
     <string name="l10n_accounts_36bae31" formatted="false">Cuentas</string>

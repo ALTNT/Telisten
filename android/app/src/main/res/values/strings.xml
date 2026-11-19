@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="l10n_appearance">Appearance</string>
+    <string name="l10n_theme">Theme</string>
+    <string name="l10n_follow_system">Follow system</string>
+    <string name="l10n_day_mode">Day mode</string>
+    <string name="l10n_night_mode">Night mode</string>
+    <string name="l10n_language">Language</string>
     <string name="l10n_s_used_ea8ce9d">%s used</string>
     <string name="l10n_1_12_characters_uses_this_exact_telegram_6a9c019" formatted="false">1–12 characters. Uses this exact Telegram folder name for this account. Existing folders are not renamed.</string>
     <string name="l10n_accounts_36bae31" formatted="false">Accounts</string>

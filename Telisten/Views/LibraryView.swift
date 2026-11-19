@@ -66,6 +66,7 @@ struct LibraryView: View {
     @State private var showVideos = false
     @State private var showImportedPlaylists = false
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var connectionStatus = TelegramConnectionStatus.connecting
     #if DEBUG
     @State private var showSettings = ProcessInfo.processInfo.arguments.contains("--demo-settings")
     #else
@@ -238,6 +239,13 @@ struct LibraryView: View {
                 Text("This permanently deletes \(playlist.title) from Telegram. This cannot be undone.")
             }
         }
+        .task {
+            let updates = await model.telegramConnectionService.connectionStateUpdates()
+            for await value in updates {
+                guard !Task.isCancelled else { return }
+                connectionStatus = TelegramConnectionStatus(rawValue: value) ?? .connecting
+            }
+        }
         #if os(iOS)
         .background { PlayerWindowSizeReader(size: $windowSize, displayMidpoint: $displayMidpoint) }
         #endif
@@ -354,12 +362,6 @@ struct LibraryView: View {
 
     private var sidebar: some View {
         List(selection: $model.selected) {
-            // Keep connection status inside the list so the navigation bar
-            // retains its own safe area and its controls remain accessible.
-            VideoConnectionStatusView(service: model.telegramConnectionService)
-                .padding(.vertical, 4)
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
             Section("Library") {
                 Label("Search all music", systemImage: "magnifyingglass.circle.fill")
                     .tag(SidebarSelection.globalSearch)
@@ -437,7 +439,24 @@ struct LibraryView: View {
             #if os(iOS) || os(visionOS)
             ToolbarItem(placement: .topBarLeading) { accountMenu }
             #else
-            ToolbarItem(placement: .navigation) { accountMenu }
+            ToolbarItem(placement: .navigation) {
+                HStack(spacing: 6) {
+                    accountMenu
+                    // The native toolbar menu can omit overlays from its label.
+                    Group {
+                        if connectionStatus == .ready {
+                            Circle().fill(connectionStatus.color).frame(width: 7, height: 7)
+                        } else {
+                            Image(systemName: connectionStatus.symbol)
+                                .font(.system(size: 10))
+                                .foregroundStyle(connectionStatus.color)
+                        }
+                    }
+                    .frame(width: 12, height: 16)
+                    .help(Text(connectionStatus.message))
+                    .accessibilityHidden(true)
+                }
+            }
             #endif
             ToolbarItem(placement: .primaryAction) {
                 HStack {
@@ -452,33 +471,50 @@ struct LibraryView: View {
 
     private var accountMenu: some View {
         Menu {
-            ForEach(model.accounts) { account in
-                Button {
-                    Task { await model.switchAccount(to: account) }
-                } label: {
-                    Label(
-                        account.displayName,
-                        systemImage: account.id == model.activeAccountID
-                            ? "checkmark.circle.fill"
-                            : "person.crop.circle"
-                    )
+            Section {
+                ForEach(model.accounts) { account in
+                    Button {
+                        Task { await model.switchAccount(to: account) }
+                    } label: {
+                        Label(
+                            account.displayName,
+                            systemImage: account.id == model.activeAccountID
+                                ? "checkmark.circle.fill"
+                                : "person.crop.circle"
+                        )
+                    }
+                    .disabled(account.id == model.activeAccountID)
                 }
-                .disabled(account.id == model.activeAccountID)
-            }
-            if !model.accounts.isEmpty { Divider() }
-            Button("Add Account", systemImage: "person.badge.plus") {
-                Task { await model.addAccount() }
+                if !model.accounts.isEmpty { Divider() }
+                Button("Add Account", systemImage: "person.badge.plus") {
+                    Task { await model.addAccount() }
+                }
+            } header: {
+                Text(connectionStatus.message)
             }
         } label: {
             HStack(spacing: 6) {
-                if let account = model.activeAccount {
-                    AccountAvatar(model: model, account: account, size: 28)
-                } else {
-                    Image(systemName: "person.crop.circle")
-                        .font(.title3)
-                        .frame(width: 28, height: 28)
-                        .foregroundStyle(.secondary)
+                Group {
+                    if let account = model.activeAccount {
+                        AccountAvatar(model: model, account: account, size: 28)
+                    } else {
+                        Image(systemName: "person.crop.circle")
+                            .font(.title3)
+                            .frame(width: 28, height: 28)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                #if !os(macOS)
+                .overlay(alignment: .bottomTrailing) {
+                    Image(systemName: connectionStatus.symbol)
+                        .font(.system(size: 8))
+                        .foregroundStyle(connectionStatus.color)
+                        .frame(width: 11, height: 11)
+                        .background(.background, in: Circle())
+                        .offset(x: 1, y: 1)
+                        .accessibilityHidden(true)
+                }
+                #endif
                 #if os(iOS)
                 if horizontalSizeClass != .regular {
                     Text(model.activeAccount?.displayName ?? "Account")
@@ -499,6 +535,7 @@ struct LibraryView: View {
             }
         }
         .accessibilityLabel("Telegram account")
+        .accessibilityValue(Text(connectionStatus.message))
     }
 
     private var nonPlaylistChats: [MusicChat] {

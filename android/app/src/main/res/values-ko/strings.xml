@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="l10n_appearance">모양</string>
+    <string name="l10n_theme">테마</string>
+    <string name="l10n_follow_system">시스템 설정 따르기</string>
+    <string name="l10n_day_mode">라이트 모드</string>
+    <string name="l10n_night_mode">다크 모드</string>
+    <string name="l10n_language">언어</string>
     <string name="l10n_s_used_ea8ce9d">%s 사용됨</string>
     <string name="l10n_1_12_characters_uses_this_exact_telegram_6a9c019" formatted="false">1~12자. 이 계정에 대해 정확한 텔레그램 폴더 이름을 사용합니다. 기존 폴더의 이름은 바뀌지 않습니다.</string>
     <string name="l10n_accounts_36bae31" formatted="false">계정</string>

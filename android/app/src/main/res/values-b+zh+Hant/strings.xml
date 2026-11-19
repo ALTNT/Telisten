@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="l10n_appearance">外觀</string>
+    <string name="l10n_theme">主題</string>
+    <string name="l10n_follow_system">跟隨系統</string>
+    <string name="l10n_day_mode">日間模式</string>
+    <string name="l10n_night_mode">夜間模式</string>
+    <string name="l10n_language">語言</string>
     <string name="l10n_s_used_ea8ce9d">已使用 %s</string>
     <string name="l10n_1_12_characters_uses_this_exact_telegram_6a9c019" formatted="false">1–12 個字元。為此帳戶使用這個確切的 Telegram 資料夾名稱。現有資料夾不會被重新命名。</string>
     <string name="l10n_accounts_36bae31" formatted="false">帳戶</string>

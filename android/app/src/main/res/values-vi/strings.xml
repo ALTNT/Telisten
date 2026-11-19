@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="l10n_appearance">Giao diện</string>
+    <string name="l10n_theme">Chủ đề</string>
+    <string name="l10n_follow_system">Theo hệ thống</string>
+    <string name="l10n_day_mode">Chế độ sáng</string>
+    <string name="l10n_night_mode">Chế độ tối</string>
+    <string name="l10n_language">Ngôn ngữ</string>
     <string name="l10n_s_used_ea8ce9d">%s đã được sử dụng</string>
     <string name="l10n_1_12_characters_uses_this_exact_telegram_6a9c019" formatted="false">1–12 ký tự. Sử dụng tên thư mục Telegram chính xác này cho tài khoản này. Các thư mục hiện có không được đổi tên.</string>
     <string name="l10n_accounts_36bae31" formatted="false">Tài khoản</string>

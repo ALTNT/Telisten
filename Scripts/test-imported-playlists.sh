@@ -27,7 +27,7 @@ Path(sys.argv[1]).write_text(fixture.replace("    // IMPORTED_RESOLVER_METHOD", 
 PY
 xcrun swiftc -module-cache-path "$test_directory/module-cache" -swift-version 6 -parse-as-library \
   Telisten/Core/Models.swift Telisten/Core/ImportedPlaylist.swift Telisten/Core/ImportedPlaylistSync.swift \
-  Telisten/Storage/ImportedPlaylistStore.swift "$test_directory/playback-tests.swift" \
+  Telisten/Core/Formatting.swift Telisten/Storage/ImportedPlaylistStore.swift "$test_directory/playback-tests.swift" \
   -o "$test_directory/playback-tests"
 "$test_directory/playback-tests"
 xcrun swiftc -module-cache-path "$test_directory/module-cache" -swift-version 6 -parse-as-library \

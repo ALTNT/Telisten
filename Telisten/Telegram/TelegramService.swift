@@ -861,8 +861,7 @@ actor TelegramService {
             if importedMusicWaitBudget?.hasExpired(now: Foundation.Date()) == true { break }
         }
         PlaybackDiagnostics.log("imported_music_timeout request=\(requestID) hasCommand=\(!commandIDs.isEmpty) hasProgress=\(!lastReply.isEmpty) foreground=\(importedMusicIsForeground)")
-        let timeoutMessage = NSLocalizedString("Timed out waiting for the music bot's audio file. You can retry or choose received audio.",
-            comment: "An imported playlist audio request timed out")
+        let timeoutMessage = localizedUI("Timed out waiting for the music bot's audio file. You can retry or choose received audio.")
         throw ServiceError.telegram(lastReply.isEmpty ? timeoutMessage : "\(timeoutMessage)\n\(lastReply)")
     }
 

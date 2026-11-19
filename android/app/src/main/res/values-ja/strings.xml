@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="l10n_appearance">外観</string>
+    <string name="l10n_theme">テーマ</string>
+    <string name="l10n_follow_system">システムに合わせる</string>
+    <string name="l10n_day_mode">ライトモード</string>
+    <string name="l10n_night_mode">ダークモード</string>
+    <string name="l10n_language">言語</string>
     <string name="l10n_s_used_ea8ce9d">%s が使用されました</string>
     <string name="l10n_1_12_characters_uses_this_exact_telegram_6a9c019" formatted="false">1 ～ 12 文字。このアカウントには、この正確な Telegram フォルダー名が使用されます。既存のフォルダーの名前は変更されません。</string>
     <string name="l10n_accounts_36bae31" formatted="false">アカウント</string>

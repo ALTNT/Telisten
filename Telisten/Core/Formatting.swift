@@ -1,7 +1,47 @@
 import Foundation
 
+enum AppLanguage: String, CaseIterable {
+    static let storageKey = "app.language"
+
+    case system
+    case english = "en"
+    case simplifiedChinese = "zh-Hans"
+    case traditionalChinese = "zh-Hant"
+    case japanese = "ja"
+    case vietnamese = "vi"
+    case french = "fr"
+    case spanish = "es"
+    case korean = "ko"
+
+    var nativeName: String {
+        switch self {
+        case .system: return ""
+        case .english: return "English"
+        case .simplifiedChinese: return "简体中文"
+        case .traditionalChinese: return "繁體中文"
+        case .japanese: return "日本語"
+        case .vietnamese: return "Tiếng Việt"
+        case .french: return "Français"
+        case .spanish: return "Español"
+        case .korean: return "한국어"
+        }
+    }
+
+    var locale: Locale? {
+        self == .system ? nil : Locale(identifier: rawValue)
+    }
+
+    func localized(_ text: String) -> String {
+        // Dynamic strings do not receive SwiftUI's locale environment.
+        let bundle = self == .system ? Bundle.main
+            : Bundle.main.path(forResource: rawValue, ofType: "lproj").flatMap(Bundle.init(path:)) ?? .main
+        return bundle.localizedString(forKey: text, value: text, table: "Localizable")
+    }
+}
+
 func localizedUI(_ text: String) -> String {
-    Bundle.main.localizedString(forKey: text, value: text, table: "Localizable")
+    let selection = UserDefaults.standard.string(forKey: AppLanguage.storageKey) ?? ""
+    return (AppLanguage(rawValue: selection) ?? .system).localized(text)
 }
 
 @MainActor

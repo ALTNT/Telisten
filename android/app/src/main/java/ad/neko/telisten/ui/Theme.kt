@@ -1,5 +1,7 @@
 package ad.neko.telisten.ui
 
+import ad.neko.telisten.AppAppearance
+import ad.neko.telisten.LocalAppPreferences
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -35,10 +37,16 @@ private val Dark = darkColorScheme(
     outline = Color(0xFF7C8A7E), outlineVariant = Color(0xFF354037),
 )
 
+@Composable internal fun appUsesDarkTheme(): Boolean = when (LocalAppPreferences.current.appearance) {
+    AppAppearance.SYSTEM -> isSystemInDarkTheme()
+    AppAppearance.LIGHT -> false
+    AppAppearance.DARK -> true
+}
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable fun TelistenTheme(content: @Composable () -> Unit) {
     MaterialExpressiveTheme(
-        colorScheme = if (isSystemInDarkTheme()) Dark else Light,
+        colorScheme = if (appUsesDarkTheme()) Dark else Light,
         typography = Typography(
             headlineLarge = TextStyle(fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.SemiBold),
             headlineMedium = TextStyle(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold),
