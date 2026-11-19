@@ -36,6 +36,7 @@ final class AudioPlayer: ObservableObject {
     var onError: (@MainActor @Sendable (String) -> Void)?
 
     var hasCurrentItem: Bool { player.currentItem != nil }
+    var isPlaybackRequested: Bool { wantsPlayback }
 
     private static let volumeDefaultsKey = "player.volume"
     private let player: AVPlayer

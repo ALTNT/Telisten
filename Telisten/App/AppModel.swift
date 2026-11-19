@@ -1,5 +1,8 @@
 import Foundation
 import Combine
+#if os(iOS)
+import UIKit
+#endif
 
 enum SidebarSelection: Hashable {
     case globalSearch
@@ -22,6 +25,7 @@ private enum QRLoginWakeReason: Sendable {
 @MainActor
 final class AppModel: ObservableObject {
     private static let chatMusicPageSize: Int32 = 30
+    private static let automaticPlaybackStartTimeout: Duration = .seconds(5)
     private static let cacheLimitDefaultsKey = "offlineCache.limitBytes"
     private static let lyricsServerDefaultsKey = "lyrics.serverURL"
 
@@ -173,6 +177,7 @@ final class AppModel: ObservableObject {
     private var loginPhone = ""
     private var previousAccountID: String?
     private var playbackTask: Task<Void, Never>?
+    private var automaticPlaybackStart: (id: UUID, trackID: String)?
     private var qrCodeLoginTask: Task<Void, Never>?
     private var qrCodeLoginOperationID: UUID?
     private var passwordRequestedByQRCode = false
@@ -236,6 +241,7 @@ final class AppModel: ObservableObject {
         player.onPlayRequested = { [weak self] in self?.resumeRestoredTrack() }
         player.onError = { [weak self] message in
             guard let self else { return }
+            if let start = self.automaticPlaybackStart, self.player.track?.id == start.trackID { return }
             if let track = self.player.track,
                self.player.canRecoverFromCachedFile(track) {
                 self.cacheDuringPlayback(track, fallbackError: message)
@@ -2227,6 +2233,10 @@ final class AppModel: ObservableObject {
     }
 
     func next() {
+        advanceQueue(automatically: false)
+    }
+
+    private func advanceQueue(automatically: Bool) {
         if playingImportedPlaylistID != nil {
             advanceImportedTrack(backwards: false)
             return
@@ -2244,7 +2254,7 @@ final class AppModel: ObservableObject {
             guard let currentQueueIndex, currentQueueIndex > 0 else { return }
             index = currentQueueIndex - 1
         }
-        playQueueTrack(at: index)
+        playQueueTrack(at: index, automaticallyAdvancingFrom: automatically ? player.track?.id : nil)
     }
 
     func previous() {
@@ -2281,72 +2291,175 @@ final class AppModel: ObservableObject {
         persistLibrary()
     }
 
-    private func playQueueTrack(at index: Int) {
-        guard queue.indices.contains(index) else { return }
+    private func playQueueTrack(at index: Int, automaticallyAdvancingFrom previousTrackID: String? = nil) {
+        guard let track = beginQueueTrack(at: index) else { return }
+        schedulePlayback(of: track, automaticallyAdvancingFrom: previousTrackID)
+    }
+
+    private func beginQueueTrack(at index: Int) -> Track? {
+        guard queue.indices.contains(index) else { return nil }
         currentQueueIndex = index
         let track = queue[index]
         knownTracks[track.id] = track
         resetTrackDetails(ifChangingTo: track)
         player.beginLoading(track)
         persistLibrary()
-        schedulePlayback(of: track)
+        return track
     }
 
-    private func schedulePlayback(of track: Track) {
+    private func schedulePlayback(of track: Track, automaticallyAdvancingFrom previousTrackID: String? = nil) {
         playbackTask?.cancel()
+        automaticPlaybackStart = nil
         playbackTask = Task { [weak self] in
-            guard !Task.isCancelled else { return }
-            await self?.prepareAndPlay(track)
+            guard let self, !Task.isCancelled else { return }
+            let startedTrack: Track?
+            if let previousTrackID {
+                startedTrack = await self.prepareAutomaticPlayback(track, previousTrackID: previousTrackID)
+            } else {
+                startedTrack = await self.prepareAndPlay(track)
+            }
+            guard let startedTrack, !Task.isCancelled, self.player.track?.id == startedTrack.id else { return }
+            await self.loadLyrics(for: startedTrack)
         }
     }
 
-    private func prepareAndPlay(_ track: Track) async {
+    private func prepareAutomaticPlayback(_ track: Track, previousTrackID: String) async -> Track? {
+        #if os(iOS)
+        // The old item has ended, so keep the app running during the gap before the next item starts.
+        var backgroundTask = UIBackgroundTaskIdentifier.invalid
+        func endBackgroundTask() {
+            guard backgroundTask != .invalid else { return }
+            let identifier = backgroundTask
+            backgroundTask = .invalid
+            UIApplication.shared.endBackgroundTask(identifier)
+        }
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Automatic audio playback") {
+            endBackgroundTask()
+        }
+        defer { endBackgroundTask() }
+        #endif
+        return await prepareAndPlay(track, automaticallyAdvancingFrom: previousTrackID)
+    }
+
+    private func prepareAndPlay(_ track: Track, automaticallyAdvancingFrom previousTrackID: String? = nil) async -> Track? {
         PlaybackDiagnostics.log("playback_start track=\(track.id) size=\(track.size) mime=\(track.mimeType)")
         if let url = await cache.localURL(for: track) {
-            PlaybackDiagnostics.log("playback_cache_hit track=\(track.id)")
-            guard !Task.isCancelled, player.track?.id == track.id else { return }
-            cachedIDs.insert(track.id)
-            downloads[track.id] = DownloadStatus(progress: 1, isCached: true)
-            knownTracks[track.id] = track
-            persistLibrary()
-            player.load(track, from: url)
-        } else {
-            PlaybackDiagnostics.log("playback_cache_miss track=\(track.id)")
-            guard !Task.isCancelled, player.track?.id == track.id else { return }
-            if cachedIDs.remove(track.id) != nil {
-                if downloads[track.id]?.isCached == true {
-                    downloads[track.id] = .none
-                }
-                if selected == .downloads { tracks.removeAll { $0.id == track.id } }
-                Task { [weak self] in await self?.refreshCacheUsage() }
+            guard !Task.isCancelled, player.track?.id == track.id else { return nil }
+            playCachedTrack(track, from: url)
+            if previousTrackID != nil {
+                await waitForPlaybackStart(of: track, until: .now.advanced(by: Self.automaticPlaybackStartTimeout))
             }
-            guard !Task.isCancelled, player.track?.id == track.id else { return }
-            let transfer = await progressiveTransfer(for: track)
-            guard !Task.isCancelled, player.track?.id == track.id else { return }
-            player.loadStreaming(track) { offset, length in
-                try await transfer.bytes(at: offset, length: length)
-            }
-            // Start caching even when the decoder has not requested or received
-            // its first bytes yet. Both paths reuse the same transfer and task.
-            cacheDuringPlayback(track)
+            return track
         }
-        guard !Task.isCancelled, player.track?.id == track.id else { return }
-        await loadLyrics(for: track)
+
+        PlaybackDiagnostics.log("playback_cache_miss track=\(track.id)")
+        guard !Task.isCancelled, player.track?.id == track.id else { return nil }
+        if cachedIDs.remove(track.id) != nil {
+            if downloads[track.id]?.isCached == true {
+                downloads[track.id] = .none
+            }
+            if selected == .downloads { tracks.removeAll { $0.id == track.id } }
+            Task { [weak self] in await self?.refreshCacheUsage() }
+        }
+
+        let deadline = ContinuousClock.now.advanced(by: Self.automaticPlaybackStartTimeout)
+        if let previousTrackID, await telegram.videoConnectionState() == "connectionStateWaitingForNetwork" {
+            return await playCachedFallback(after: track, excluding: previousTrackID, error: .notConnectedToInternet)
+        }
+        guard !Task.isCancelled, player.track?.id == track.id, player.isPlaybackRequested else { return nil }
+        let transfer = await progressiveTransfer(for: track)
+        guard !Task.isCancelled, player.track?.id == track.id, player.isPlaybackRequested else { return nil }
+        let startID = UUID()
+        if previousTrackID != nil { automaticPlaybackStart = (startID, track.id) }
+        defer {
+            if automaticPlaybackStart?.id == startID { automaticPlaybackStart = nil }
+        }
+        player.loadStreaming(track) { offset, length in
+            try await transfer.bytes(at: offset, length: length)
+        }
+        // Start caching even before the decoder requests bytes. Automatic
+        // playback handles startup failures itself while the shared download can continue.
+        cacheDuringPlayback(track, reportsPlaybackFailure: previousTrackID == nil)
+        if let previousTrackID {
+            await waitForPlaybackStart(of: track, until: deadline)
+            if !player.isPlaying {
+                let error: URLError.Code = player.isLoading ? .timedOut : .cannotLoadFromNetwork
+                return await playCachedFallback(after: track, excluding: previousTrackID, error: error)
+            }
+        }
+        return track
     }
 
-    private func cacheDuringPlayback(_ track: Track, fallbackError: String? = nil) {
+    private func waitForPlaybackStart(of track: Track, until deadline: ContinuousClock.Instant) async {
+        // A connected TDLib client can still stall. Wait for AVPlayer to actually start playing.
+        while !Task.isCancelled, player.track?.id == track.id, player.isLoading, !player.isPlaying,
+              ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
+    private func playCachedFallback(after track: Track, excluding previousTrackID: String, error: URLError.Code) async -> Track? {
+        guard let index = currentQueueIndex, queue.indices.contains(index), queue[index].id == track.id else { return nil }
+        let candidates: [Int]
+        switch playbackMode {
+        case .order:
+            candidates = Array((index + 1)..<queue.count)
+        case .reverseOrder:
+            candidates = Array((0..<index).reversed())
+        case .shuffle:
+            candidates = queue.indices.filter { $0 != index && queue[$0].id != previousTrackID }.shuffled()
+        case .repeatOne:
+            candidates = []
+        }
+        for candidate in candidates {
+            guard !Task.isCancelled, player.track?.id == track.id, player.isPlaybackRequested else { return nil }
+            if player.isPlaying { return track }
+            guard queue.indices.contains(candidate) else { continue }
+            let next = queue[candidate]
+            guard next.id != track.id, let url = await cache.localURL(for: next) else { continue }
+            guard !Task.isCancelled, player.track?.id == track.id, player.isPlaybackRequested else { return nil }
+            if player.isPlaying { return track }
+            guard queue.indices.contains(candidate), queue[candidate].id == next.id,
+                  beginQueueTrack(at: candidate) != nil else { continue }
+            PlaybackDiagnostics.log("playback_cached_fallback skipped=\(track.id) track=\(next.id) error=\(error.rawValue)")
+            playCachedTrack(next, from: url)
+            await waitForPlaybackStart(of: next, until: .now.advanced(by: Self.automaticPlaybackStartTimeout))
+            return next
+        }
+        guard !Task.isCancelled, player.track?.id == track.id, player.isPlaybackRequested else { return nil }
+        if player.isPlaying { return track }
+        PlaybackDiagnostics.log("playback_cached_fallback_unavailable track=\(track.id) error=\(error.rawValue)")
+        player.beginLoading(track)
+        player.pause()
+        errorMessage = UserFacingError.message(for: URLError(error))
+        return nil
+    }
+
+    private func playCachedTrack(_ track: Track, from url: URL) {
+        PlaybackDiagnostics.log("playback_cache_hit track=\(track.id)")
+        cachedIDs.insert(track.id)
+        downloads[track.id] = DownloadStatus(progress: 1, isCached: true)
+        knownTracks[track.id] = track
+        persistLibrary()
+        player.load(track, from: url, autoplay: player.isPlaybackRequested)
+        Task { [weak self] in await self?.prefetchNextPlaylistTrack(after: track) }
+    }
+
+    private func cacheDuringPlayback(_ track: Track, fallbackError: String? = nil, reportsPlaybackFailure: Bool = true) {
         Task { [weak self] in
             guard let self else { return }
             do {
                 let url = try await self.cachedFile(for: track)
                 guard self.player.track?.id == track.id else { return }
                 self.player.useCachedFileIfNeeded(track, from: url)
-                await self.prefetchNextPlaylistTrack(after: track)
+                if self.isPlaylistTrack(track) {
+                    await self.prefetchNextPlaylistTrack(after: track)
+                }
             } catch is CancellationError {
                 return
             } catch {
                 PlaybackDiagnostics.log("playback_download_failed track=\(track.id) previousPlayerError=\(fallbackError ?? "none")", error: error)
-                if self.player.track?.id == track.id,
+                if reportsPlaybackFailure, self.player.track?.id == track.id,
                    fallbackError != nil || self.player.isLoading {
                     self.player.failLoading()
                     self.errorMessage = UserFacingError.message(for: error)
@@ -2357,7 +2470,9 @@ final class AppModel: ObservableObject {
     }
 
     private func prefetchNextPlaylistTrack(after track: Track) async {
-        guard isPlaylistTrack(track),
+        let connection = await telegram.videoConnectionState()
+        guard connection == "connectionStateReady" || connection == "connectionStateUpdating",
+              player.track?.id == track.id, player.isPlaybackRequested,
               let index = currentQueueIndex,
               queue.indices.contains(index),
               queue[index].id == track.id else { return }
@@ -3658,7 +3773,7 @@ final class AppModel: ObservableObject {
             player.seek(to: 0)
             player.play()
         } else {
-            next()
+            advanceQueue(automatically: true)
         }
     }
 
