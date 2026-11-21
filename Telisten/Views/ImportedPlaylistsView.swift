@@ -25,7 +25,7 @@ struct ImportedPlaylistsView: View {
                         .disabled(isReading || sharedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     if isReading { ProgressView("Reading playlist…") }
                     if let importError { Text(localizedUI(importError)).foregroundStyle(.red) }
-                    Text("Import saves the song list. Telegram sync shares it with your other devices. Audio is requested only when you play a song.")
+                    Text("Import saves the song list. Telegram sync shares it with your other devices. During playback, Telisten prepares the next song in advance.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if let preview {
@@ -188,9 +188,22 @@ private struct ImportedPlaylistSyncConflictsView: View {
 }
 
 struct ImportedPlaylistDetailView: View {
+    private struct AddSelection: Identifiable {
+        let id = UUID()
+        let tracks: [Track]
+    }
+
     @ObservedObject var model: AppModel
     var playlistID: String
     @State private var choosingSource: ImportedPlaylistEntry?
+    @State private var isSelecting = false
+    @State private var selectedEntryIDs: Set<String> = []
+    @State private var addSelection: AddSelection?
+    @State private var addTask: Task<Void, Never>?
+    @State private var addOperationID: UUID?
+    @State private var addCompletedCount = 0
+    @State private var addTotalCount = 0
+    @State private var addMessage: String?
 
     private var playlist: ImportedPlaylist? { model.importedPlaylists.first { $0.id == playlistID } }
 
@@ -206,6 +219,14 @@ struct ImportedPlaylistDetailView: View {
                 Section {
                     Link("Open original playlist", destination: playlist.sourceURL)
                     Text("\(playlist.entries.count) / \(playlist.expectedCount) songs")
+                    if !isSelecting {
+                        Button {
+                            model.playImportedEntries(Set(playlist.entries.map(\.id)), in: playlist.id)
+                        } label: {
+                            Label("Play all", systemImage: "play.fill")
+                        }
+                        .disabled(playlist.entries.isEmpty || model.resolvingImportedEntryID != nil)
+                    }
                     if model.resolvingImportedEntryID != nil {
                         HStack {
                             ProgressView().controlSize(.small)
@@ -215,11 +236,53 @@ struct ImportedPlaylistDetailView: View {
                         }
                     }
                 }
+                if isSelecting {
+                    Section {
+                        let allIDs = Set(playlist.entries.map(\.id))
+                        let allSelected = !allIDs.isEmpty && selectedEntryIDs.isSuperset(of: allIDs)
+                        Button(localizedUI(allSelected ? "Deselect all" : "Select all")) {
+                            selectedEntryIDs = allSelected ? [] : allIDs
+                        }
+                        Text(String(format: localizedUI("%lld selected"), Int64(selectedEntryIDs.count)))
+                            .foregroundStyle(.secondary)
+                        Button {
+                            model.playImportedEntries(selectedEntryIDs, in: playlist.id)
+                            finishSelecting()
+                        } label: {
+                            Label("Play", systemImage: "play.fill")
+                        }
+                        .disabled(selectedEntryIDs.isEmpty || model.resolvingImportedEntryID != nil)
+                        Button {
+                            prepareToAdd(playlist.entries.filter { selectedEntryIDs.contains($0.id) })
+                        } label: {
+                            Label("Add to…", systemImage: "text.badge.plus")
+                        }
+                        .disabled(selectedEntryIDs.isEmpty || addTask != nil)
+                    }
+                }
+                if addTask != nil || addMessage != nil {
+                    Section {
+                        if addTask != nil {
+                            ProgressView("Preparing selected audio…", value: Double(addCompletedCount),
+                                         total: Double(addTotalCount))
+                            Button("Cancel") { cancelAdd() }
+                        }
+                        if let addMessage { Text(addMessage).foregroundStyle(.secondary) }
+                    }
+                }
                 Section {
                     ForEach(playlist.entries) { entry in
-                        Button { model.playImportedEntry(entry.id, in: playlist.id) } label: {
+                        Button {
+                            if isSelecting {
+                                if !selectedEntryIDs.insert(entry.id).inserted { selectedEntryIDs.remove(entry.id) }
+                            } else {
+                                model.playImportedEntry(entry.id, in: playlist.id)
+                            }
+                        } label: {
                             HStack(spacing: 10) {
-                                Image(systemName: statusSymbol(entry))
+                                Image(systemName: isSelecting
+                                      ? (selectedEntryIDs.contains(entry.id) ? "checkmark.circle.fill" : "circle")
+                                      : statusSymbol(entry))
                                     .foregroundStyle(Color.telistenAccent)
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(entry.title.isEmpty ? entry.songID : entry.title).lineLimit(1)
@@ -239,13 +302,17 @@ struct ImportedPlaylistDetailView: View {
                             }
                         }
                         .buttonStyle(.plain)
-                        .disabled(model.resolvingImportedEntryID != nil)
+                        .disabled(!isSelecting && model.resolvingImportedEntryID != nil)
+                        .accessibilityAddTraits(isSelecting && selectedEntryIDs.contains(entry.id) ? .isSelected : [])
                         .contextMenu {
-                            Link("Open original song", destination: entry.songURL)
-                            Button("Choose received audio") { choosingSource = entry }
-                            if entry.track != nil || model.importedPlaylistSyncState.source(playlistID: playlist.id, songID: entry.songID) != nil {
-                                Button("Forget matched audio") {
-                                    model.clearImportedSource(playlistID: playlist.id, entryID: entry.id)
+                            if !isSelecting {
+                                Button("Add to…") { prepareToAdd([entry]) }.disabled(addTask != nil)
+                                Link("Open original song", destination: entry.songURL)
+                                Button("Choose received audio") { choosingSource = entry }
+                                if entry.track != nil || model.importedPlaylistSyncState.source(playlistID: playlist.id, songID: entry.songID) != nil {
+                                    Button("Forget matched audio") {
+                                        model.clearImportedSource(playlistID: playlist.id, entryID: entry.id)
+                                    }
                                 }
                             }
                         }
@@ -256,11 +323,88 @@ struct ImportedPlaylistDetailView: View {
             }
         }
         .navigationTitle(playlist?.title ?? "")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button(localizedUI(isSelecting ? "Done" : "Select songs")) {
+                    if isSelecting { finishSelecting() }
+                    else { isSelecting = true }
+                }
+                .disabled(!isSelecting && playlist?.entries.isEmpty != false)
+            }
+        }
+        .onChange(of: playlist?.entries.map(\.id)) { ids in
+            selectedEntryIDs.formIntersection(ids ?? [])
+        }
+        .onChange(of: model.activeAccountID) { _ in
+            cancelAdd()
+            finishSelecting()
+            addSelection = nil
+            addMessage = nil
+        }
+        .onDisappear { cancelAdd() }
         .sheet(item: $choosingSource) { entry in
             ImportedAudioPicker(model: model, playlistID: playlistID, entry: entry)
                 .allowsApplicationTermination()
                 .id(model.activeAccountID)
         }
+        .sheet(item: $addSelection) { selection in
+            BatchPlaylistSheet(model: model, tracks: selection.tracks) { trackID in
+                for entry in playlist?.entries ?? [] where entry.track?.id == trackID {
+                    selectedEntryIDs.remove(entry.id)
+                }
+            }
+            .allowsApplicationTermination()
+            .id(model.activeAccountID)
+        }
+    }
+
+    private func finishSelecting() {
+        isSelecting = false
+        selectedEntryIDs.removeAll()
+    }
+
+    private func prepareToAdd(_ entries: [ImportedPlaylistEntry]) {
+        guard addTask == nil, !entries.isEmpty else { return }
+        let operationID = UUID()
+        let accountID = model.activeAccountID
+        addOperationID = operationID
+        addCompletedCount = 0
+        addTotalCount = entries.count
+        addMessage = nil
+        addTask = Task {
+            defer {
+                if addOperationID == operationID { addTask = nil }
+            }
+            var tracks: [Track] = []
+            var seen: Set<String> = []
+            var failures = 0
+            var lastError: String?
+            for entry in entries {
+                guard !Task.isCancelled, model.activeAccountID == accountID else { return }
+                do {
+                    let track = try await model.prepareImportedTrack(entry.id, in: playlistID)
+                    if seen.insert(track.id).inserted { tracks.append(track) }
+                } catch {
+                    failures += 1
+                    lastError = error.localizedDescription
+                }
+                guard addOperationID == operationID else { return }
+                addCompletedCount += 1
+            }
+            guard !Task.isCancelled, model.activeAccountID == accountID,
+                  addOperationID == operationID else { return }
+            if failures > 0 {
+                addMessage = tracks.isEmpty ? lastError
+                    : String(format: localizedUI("Could not prepare %lld selected songs."), Int64(failures))
+            }
+            if !tracks.isEmpty { addSelection = AddSelection(tracks: tracks) }
+        }
+    }
+
+    private func cancelAdd() {
+        addTask?.cancel()
+        addTask = nil
+        addOperationID = nil
     }
 
     private func statusSymbol(_ entry: ImportedPlaylistEntry) -> String {

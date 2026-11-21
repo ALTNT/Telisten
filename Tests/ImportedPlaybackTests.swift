@@ -106,12 +106,14 @@ private actor ImportedResolverHarness {
 private final class ImportedTestPlayer {
     var track: Track?
     var currentTime: TimeInterval = 0
-    func reset() { track = nil }
+    var isPlaying = false
+    func reset() { track = nil; isPlaying = false }
 }
 
 private actor ImportedTestTelegram {
     let track: Track
     var requests = 0
+    var requestedSongIDs: [String] = []
     var restoreRequests = 0
     var unavailableSongIDs: Set<String> = []
     init(track: Track) { self.track = track }
@@ -122,6 +124,7 @@ private actor ImportedTestTelegram {
     }
     func resolveImportedMusic(_ entry: ImportedPlaylistEntry, using config: SearchBotConfig) async throws -> Track {
         requests += 1
+        requestedSongIDs.append(entry.songID)
         try await Task.sleep(for: .milliseconds(80))
         if unavailableSongIDs.contains(entry.songID) {
             throw ImportedMusicError.unavailable("This track is currently unavailable, please try again later.")
@@ -133,6 +136,7 @@ private actor ImportedTestTelegram {
 
 @MainActor
 private final class ImportedPlaybackHarness {
+    static let automaticPlaybackStartTimeout: Duration = .seconds(5)
     var importedPlaylists: [ImportedPlaylist] = []
     var importedPlaylistErrors: [String: [String: String]] = [:]
     var importedPlaylistSyncState = ImportedPlaylistSyncState()
@@ -148,6 +152,12 @@ private final class ImportedPlaybackHarness {
     var isBotSearching = false
     var isStartingImportedTrack = false
     var importedPlaybackTask: Task<Void, Never>?
+    var importedPlaybackSelection: Set<String>?
+    var importedPrefetchTask: Task<Void, Never>?
+    var importedNextEntryID: String?
+    var importedPreparation: (id: UUID, playlistID: String, entryID: String, task: Task<Track, Error>)?
+    var backgroundTransitions = 0
+    var cachedTracks: [Track] = []
     var importedPlaybackOperationID: UUID?
     var playbackTask: Task<Void, Never>?
     var queue: [Track] = []
@@ -167,8 +177,20 @@ private final class ImportedPlaybackHarness {
     func play(_ track: Track, from list: [Track]?) {
         if !isStartingImportedTrack { cancelImportedPlayback() }
         player.track = track
+        player.isPlaying = true
         queue = list ?? [track]
     }
+    func cachedFile(for track: Track) async throws -> URL {
+        cachedTracks.append(track)
+        return URL(fileURLWithPath: "/tmp/song.flac")
+    }
+    func withAutomaticPlaybackTime<Result>(_ operation: @MainActor () async -> Result) async -> Result {
+        backgroundTransitions += 1
+        return await operation()
+    }
+    func waitForPlaybackStart(of track: Track, until deadline: ContinuousClock.Instant) async {}
+    func prefetchForTest() { prefetchImportedNextTrack() }
+    func advanceAutomaticallyForTest() { advanceImportedTrack(backwards: false, automatically: true) }
 
     // IMPORTED_PLAYBACK_METHODS
     // IMPORTED_SAVE_METHOD
@@ -239,6 +261,43 @@ private enum ImportedPlaybackTests {
         secondEntry.songID = "2"
         twoSongs.entries.append(secondEntry)
         twoSongs.expectedCount = 2
+        var selectionPlaylist = twoSongs
+        var thirdEntry = entry
+        thirdEntry.id = "3:2"
+        thirdEntry.songID = "3"
+        selectionPlaylist.entries.append(thirdEntry)
+        selectionPlaylist.expectedCount = 3
+        let selectedModel = ImportedPlaybackHarness(directory: directory.appendingPathComponent("selected"), track: track)
+        precondition(selectedModel.saveImportedPlaylist(selectionPlaylist))
+        selectedModel.playImportedEntries([entry.id, thirdEntry.id], in: playlist.id)
+        await selectedModel.importedPlaybackTask?.value
+        selectedModel.prefetchForTest()
+        // Wait until the prefetch has entered the bot request, then advance while it is still pending.
+        let deadline = ContinuousClock.now.advanced(by: .seconds(1))
+        while await selectedModel.telegram.requests < 2, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        let prefetchRequests = await selectedModel.telegram.requests
+        precondition(prefetchRequests == 2, "The next request should start while the first song is playing")
+        precondition(selectedModel.playingImportedEntryID == entry.id && selectedModel.player.isPlaying)
+        selectedModel.advanceAutomaticallyForTest()
+        await selectedModel.importedPlaybackTask?.value
+        let selectedRequests = await selectedModel.telegram.requestedSongIDs
+        precondition(selectedRequests == [entry.songID, thirdEntry.songID],
+                     "Selected playback must skip unselected songs and reuse an in-flight preparation")
+        precondition(selectedModel.playingImportedEntryID == thirdEntry.id && selectedModel.backgroundTransitions == 1)
+        selectedModel.advanceAutomaticallyForTest()
+        precondition(selectedModel.importedPlaybackTask == nil, "Selected playback must end at its last song")
+
+        let cachedModel = ImportedPlaybackHarness(directory: directory.appendingPathComponent("prefetched"), track: track)
+        precondition(cachedModel.saveImportedPlaylist(twoSongs))
+        cachedModel.playImportedEntry(entry.id, in: playlist.id)
+        await cachedModel.importedPlaybackTask?.value
+        cachedModel.prefetchForTest()
+        await cachedModel.importedPrefetchTask?.value
+        precondition(cachedModel.cachedTracks == [track] && cachedModel.playingImportedEntryID == entry.id,
+                     "Prefetch should cache the next song while leaving the current song playing")
+
         precondition(unavailableModel.saveImportedPlaylist(twoSongs))
         await unavailableModel.telegram.setUnavailableSongs([entry.songID])
         unavailableModel.playImportedEntry(entry.id, in: playlist.id)
@@ -292,6 +351,7 @@ private enum ImportedPlaybackTests {
         precondition(restoreRequests == 1 && botRequests == 0 && restoredModel.player.track == track,
                      "A new device must restore the message's own file ID without issuing another bot command")
         print("PASS: imports without requests, duplicate taps, reuse, cancellation, account switching and manual bot exclusion")
+        print("PASS: selected playback, next-song caching and automatic reuse of shared preparation")
         print("PASS: unavailable replies release waiting, mark only the affected entry, allow another song and support explicit retry")
         print("PASS: production bot polling detects unavailable replies, releases its gate and ignores stale failures")
     }

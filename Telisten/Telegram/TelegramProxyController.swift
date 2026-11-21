@@ -71,7 +71,9 @@ final class TelegramProxyController: NSObject, ObservableObject {
 
     func save(_ value: TelegramProxyConfiguration) async -> Bool {
         guard value.isValid else {
-            errorMessage = localizedUI("Check proxy hosts, ports (1–65535), and unique Wi-Fi names.")
+            errorMessage = value.mode == .web
+                ? localizedUI("Enter a valid WEB proxy domain, optional path, and secret.")
+                : localizedUI("Check proxy hosts, ports (1–65535), and unique Wi-Fi names.")
             return false
         }
         guard keychain.saveTelegramProxyConfiguration(value) else {
@@ -86,6 +88,18 @@ final class TelegramProxyController: NSObject, ObservableObject {
 
     func testSavedProxy() async {
         guard !isTestingProxy else { return }
+        if configuration.mode == .web, let proxy = configuration.webProxy {
+            isTestingProxy = true
+            defer { isTestingProxy = false }
+            proxyTestResult = localizedUI("Testing the WEB proxy and Telegram connection…")
+            do {
+                try await telegram.testConnectionWebProxy(proxy)
+                proxyTestResult = localizedUI("WEB proxy and Telegram connection succeeded.")
+            } catch {
+                proxyTestResult = UserFacingError.message(for: error)
+            }
+            return
+        }
         guard let proxy = configuration.selectedProxy(isWiFi: isWiFi || wifiNetworkState.ssid != nil, ssid: wifiNetworkState.ssid) else {
             proxyTestResult = localizedUI("No SOCKS5 proxy is selected for this network. Save a fixed proxy or a matching Wi-Fi rule first.")
             return
@@ -191,20 +205,33 @@ final class TelegramProxyController: NSObject, ObservableObject {
         #endif
         // A VPN can expose a different default path while Wi-Fi is connected.
         let proxy = configuration.selectedProxy(isWiFi: isWiFi || routingSSID != nil, ssid: routingSSID)
-        let selection = "mode=\(configuration.mode.rawValue) rules=\(configuration.wifiRules.count) matchedWiFi=\(routingSSID.map { name in configuration.wifiRules.contains { $0.ssid == name } } ?? false) ssidRetained=\(ssid == nil && routingSSID != nil) target=\(proxy.map { "SOCKS5 \($0.server):\($0.port)" } ?? "direct")"
+        let webProxy = configuration.mode == .web ? configuration.webProxy?.normalized : nil
+        let target = configuration.mode == .web ? "WEB" : proxy.map { "SOCKS5 \($0.server):\($0.port)" } ?? "direct"
+        let selection = "mode=\(configuration.mode.rawValue) rules=\(configuration.wifiRules.count) matchedWiFi=\(routingSSID.map { name in configuration.wifiRules.contains { $0.ssid == name } } ?? false) ssidRetained=\(ssid == nil && routingSSID != nil) target=\(target)"
         if selection != lastProxyDiagnostic {
             PlaybackDiagnostics.log("proxy_configuration_selected \(selection)")
             lastProxyDiagnostic = selection
         }
         do {
-            try await telegram.setConnectionProxy(proxy)
-            let applied = await telegram.connectionProxyIsApplied(proxy)
+            let applied: Bool
+            if configuration.mode == .web {
+                guard let webProxy else {
+                    throw TelegramService.ServiceError.telegram(localizedUI("Invalid WEB proxy settings."))
+                }
+                try await telegram.setConnectionWebProxy(webProxy)
+                applied = await telegram.connectionWebProxyIsApplied(webProxy)
+            } else {
+                try await telegram.setConnectionProxy(proxy)
+                applied = await telegram.connectionProxyIsApplied(proxy)
+            }
             guard revision == refreshRevision else { return }
             guard applied else {
                 status = localizedUI("Waiting for Telegram connection")
                 return
             }
-            status = proxy.map { "SOCKS5 · \($0.server):\($0.port)" } ?? localizedUI("Direct / System VPN")
+            status = webProxy.map { "WEB · \($0.server)" }
+                ?? proxy.map { "SOCKS5 · \($0.server):\($0.port)" }
+                ?? localizedUI("Direct / System VPN")
             errorMessage = nil
         } catch {
             guard revision == refreshRevision else { return }

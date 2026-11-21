@@ -142,8 +142,11 @@
 		05375B959D6C4130AF2D97C6 /* TelegramProxyConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF592DBE118E4B69B72E4893 /* TelegramProxyConfiguration.swift */; };
 		38A3116E159F4A6590B8344D /* TelegramProxyConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF592DBE118E4B69B72E4893 /* TelegramProxyConfiguration.swift */; };
 		3CCCBA7823524A529046ED9B /* TelegramProxyController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2339410409F491DB30DBB69 /* TelegramProxyController.swift */; };
+		7B35B2867843424790A1CF34 /* TelegramWebProxyCarriers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B35B2867843424790A1CF33 /* TelegramWebProxyCarriers.swift */; };
 		202E8FE0D4AB4AC99DDB9CCD /* TelegramProxyController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2339410409F491DB30DBB69 /* TelegramProxyController.swift */; };
+		7B35B2867843424790A1CF35 /* TelegramWebProxyCarriers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B35B2867843424790A1CF33 /* TelegramWebProxyCarriers.swift */; };
 		CCC9D18FAB7A4BA08F8F1FC1 /* TelegramProxyController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2339410409F491DB30DBB69 /* TelegramProxyController.swift */; };
+		7B35B2867843424790A1CF36 /* TelegramWebProxyCarriers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B35B2867843424790A1CF33 /* TelegramWebProxyCarriers.swift */; };
 		A8303775B6AD458E9B0A17D6 /* TelegramProxySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5E8A550542D4878B928949D /* TelegramProxySettingsView.swift */; };
 		04700D852463480EBB956A5A /* TelegramProxySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5E8A550542D4878B928949D /* TelegramProxySettingsView.swift */; };
 		81492252DBBA42789326E23B /* TelegramProxySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5E8A550542D4878B928949D /* TelegramProxySettingsView.swift */; };
@@ -223,6 +226,7 @@
 		1A13083BFC30BBFC91565DEF /* VideoLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoLibraryView.swift; sourceTree = "<group>"; };
 		EF592DBE118E4B69B72E4893 /* TelegramProxyConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramProxyConfiguration.swift; sourceTree = "<group>"; };
 		F2339410409F491DB30DBB69 /* TelegramProxyController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramProxyController.swift; sourceTree = "<group>"; };
+		7B35B2867843424790A1CF33 /* TelegramWebProxyCarriers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramWebProxyCarriers.swift; sourceTree = "<group>"; };
 		F5E8A550542D4878B928949D /* TelegramProxySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramProxySettingsView.swift; sourceTree = "<group>"; };
 		2077D9682CE18FBC7C5C66DB /* ImportedPlaylist.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportedPlaylist.swift; sourceTree = "<group>"; };
 		9EDD150392376B8A049F1C4B /* ImportedPlaylistStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportedPlaylistStore.swift; sourceTree = "<group>"; };
@@ -265,6 +269,7 @@
 			isa = PBXGroup;
 			children = (
 				F2339410409F491DB30DBB69 /* TelegramProxyController.swift */,
+				7B35B2867843424790A1CF33 /* TelegramWebProxyCarriers.swift */,
 				6C6F59243ACDA14748435998 /* TelegramMapping.swift */,
 				3F2FCA53B713BBAE7EF9C471 /* TelegramService.swift */,
 			);
@@ -590,6 +595,7 @@
 			files = (
 				A8303775B6AD458E9B0A17D6 /* TelegramProxySettingsView.swift in Sources */,
 				3CCCBA7823524A529046ED9B /* TelegramProxyController.swift in Sources */,
+				7B35B2867843424790A1CF34 /* TelegramWebProxyCarriers.swift in Sources */,
 				54F6559288D44AFBBF056045 /* TelegramProxyConfiguration.swift in Sources */,
 				22BF53271216072E9218F281 /* VideoLibraryView.swift in Sources */,
 				0577244EB573F4678A51E03B /* VideoPlayer.swift in Sources */,
@@ -639,6 +645,7 @@
 			files = (
 				04700D852463480EBB956A5A /* TelegramProxySettingsView.swift in Sources */,
 				202E8FE0D4AB4AC99DDB9CCD /* TelegramProxyController.swift in Sources */,
+				7B35B2867843424790A1CF35 /* TelegramWebProxyCarriers.swift in Sources */,
 				05375B959D6C4130AF2D97C6 /* TelegramProxyConfiguration.swift in Sources */,
 				F422DD7C0A76DB13F0F52BC7 /* VideoLibraryView.swift in Sources */,
 				BF17C90C86A19022B7205435 /* VideoPlayer.swift in Sources */,
@@ -688,6 +695,7 @@
 			files = (
 				81492252DBBA42789326E23B /* TelegramProxySettingsView.swift in Sources */,
 				CCC9D18FAB7A4BA08F8F1FC1 /* TelegramProxyController.swift in Sources */,
+				7B35B2867843424790A1CF36 /* TelegramWebProxyCarriers.swift in Sources */,
 				38A3116E159F4A6590B8344D /* TelegramProxyConfiguration.swift in Sources */,
 				F91825E71FE9EE4FF93066F7 /* VideoLibraryView.swift in Sources */,
 				3D541F95A1D18CEE28CAA354 /* VideoPlayer.swift in Sources */,

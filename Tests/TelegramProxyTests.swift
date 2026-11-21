@@ -26,6 +26,36 @@ enum TelegramProxyTests {
         precondition(settings.selectedProxy(isWiFi: true, ssid: "Office") == remote)
         let restored = try JSONDecoder().decode(TelegramProxyConfiguration.self, from: JSONEncoder().encode(settings))
         precondition(restored == settings)
+        let legacy = try JSONEncoder().encode(settings)
+        precondition(!String(decoding: legacy, as: UTF8.self).contains("webProxy"))
+        precondition(restored.webProxy == nil)
+        let webProxy = WebProxyConfiguration(
+            server: " Proxy.Example.Org ", path: " /telegram/web/ ", secret: "cAABAgMEBQYHCAkKCwwNDg8"
+        )
+        let normalizedWebProxy = WebProxyConfiguration(
+            server: "proxy.example.org", path: "telegram/web", secret: "000102030405060708090a0b0c0d0e0f"
+        )
+        var webSettings = settings
+        webSettings.mode = .web
+        precondition(!webSettings.isValid)
+        webSettings.webProxy = webProxy
+        precondition(webSettings.isValid && webProxy.normalized == normalizedWebProxy)
+        precondition(webSettings.selectedProxy(isWiFi: true, ssid: "Home") == nil)
+        let restoredWeb = try JSONDecoder().decode(TelegramProxyConfiguration.self, from: JSONEncoder().encode(webSettings))
+        precondition(restoredWeb == webSettings)
+        let paddedSalt = Data([0x70, 0xdd] + Array(0..<16)).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
+        precondition(WebProxyConfiguration(server: webProxy.server, secret: paddedSalt).normalized.secret
+                     == "dd" + normalizedWebProxy.secret)
+        for invalid in ["127.0.0.1", "https://proxy.example.org", "proxy.example.org:443", "proxy..example.org"] {
+            precondition(!WebProxyConfiguration(server: invalid, secret: webProxy.secret).isValid)
+        }
+        for invalid in ["a/../b", "a//b", "a/%2f", "a?b", String(repeating: "a", count: 129)] {
+            precondition(!WebProxyConfiguration(server: webProxy.server, path: invalid, secret: webProxy.secret).isValid)
+        }
+        for invalid in ["", "0011", "cAABAgMEBQYHCAkKCwwNDg9", "ee" + normalizedWebProxy.secret] {
+            precondition(!WebProxyConfiguration(server: webProxy.server, secret: invalid).isValid)
+        }
         settings.wifiRules.append(WiFiProxyRule(ssid: "Home", proxy: remote))
         precondition(!settings.isValid)
         settings.wifiRules = [WiFiProxyRule(ssid: " ", proxy: lan)]
@@ -60,6 +90,6 @@ enum TelegramProxyTests {
         precondition(network.update(isWiFi: true, ssid: nil, canReadSSID: true) == nil)
         // A real SSID read is stronger evidence than a VPN's default path type.
         precondition(network.update(isWiFi: false, ssid: "Home", canReadSSID: true) == "Home")
-        print("Telegram proxy rules, validation, and transient SSID handling passed")
+        print("Telegram proxy rules, WEB credentials, persisted settings, and transient SSID handling passed")
     }
 }

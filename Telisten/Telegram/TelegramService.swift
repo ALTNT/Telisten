@@ -150,13 +150,54 @@ actor TelegramService {
     private var replacingSession = false
     private var reconnectingClient = false
     private var closingClientID: Int32?
-    private var desiredProxy: SOCKS5ProxyConfiguration?
-    private var appliedProxy: SOCKS5ProxyConfiguration?
+    private enum ConnectionProxy: Equatable {
+        case socks5(SOCKS5ProxyConfiguration)
+        case web(WebProxyConfiguration)
+
+        var diagnosticName: String {
+            switch self {
+            case let .socks5(proxy): "SOCKS5 \(proxy.server):\(proxy.port)"
+            case .web: "WEB"
+            }
+        }
+
+        func tdlibProxy() throws -> Proxy {
+            switch self {
+            case let .socks5(proxy):
+                let value = proxy.normalized
+                guard value.isValid, let port = Int(value.port) else {
+                    throw ServiceError.telegram("Invalid SOCKS5 proxy settings.")
+                }
+                return Proxy(port: port, server: value.server, type: .proxyTypeSocks5(
+                    ProxyTypeSocks5(password: value.password, username: value.username)
+                ))
+            case let .web(proxy):
+                guard proxy.isValid else { throw ServiceError.telegram(localizedUI("Invalid WEB proxy settings.")) }
+                let value = proxy.normalized
+                return Proxy(port: 443, server: value.server, type: .proxyTypeWeb(
+                    ProxyTypeWeb(path: value.path, secret: value.secret)
+                ))
+            }
+        }
+    }
+
+    private var desiredProxy: ConnectionProxy?
+    private var appliedProxy: ConnectionProxy?
     private var proxyClientReady = false
     private var proxyClientID: Int32?
     private var proxyUpdateTask: Task<Void, Swift.Error>?
+    private var clientUpdateTask: Task<Void, Never>?
+    private let webProxyCarriers = TelegramWebProxyCarriers()
 
     func setConnectionProxy(_ proxy: SOCKS5ProxyConfiguration?) async throws {
+        try await applyConnectionProxy(proxy.map { .socks5($0.normalized) })
+    }
+
+    func setConnectionWebProxy(_ proxy: WebProxyConfiguration) async throws {
+        try await applyConnectionProxy(.web(proxy.normalized))
+    }
+
+    private func applyConnectionProxy(_ proxy: ConnectionProxy?) async throws {
         desiredProxy = proxy
         // Network polling must not reopen a database while a reauthorized
         // session is being moved into place.
@@ -183,17 +224,19 @@ actor TelegramService {
             }
             let target = self.desiredProxy
             guard self.proxyClientID != client.id || self.appliedProxy != target else { return }
-            PlaybackDiagnostics.log("telegram_proxy_apply_start client=\(client.id) target=\(target.map { "SOCKS5 \($0.server):\($0.port)" } ?? "direct")")
+            PlaybackDiagnostics.log("telegram_proxy_apply_start client=\(client.id) target=\(target?.diagnosticName ?? "direct")")
             var enabledID: Int?
             if let target {
-                guard target.isValid, let port = Int(target.port) else { throw ServiceError.telegram("Invalid SOCKS5 proxy settings.") }
-                let added = try await client.addProxy(
-                    comment: "Telisten", enable: true,
-                    proxy: Proxy(port: port, server: target.server, type: .proxyTypeSocks5(
-                        ProxyTypeSocks5(password: target.password, username: target.username)
-                    ))
-                )
-                enabledID = added.id
+                let proxy = try target.tdlibProxy()
+                do {
+                    enabledID = try await client.addProxy(comment: "Telisten", enable: true, proxy: proxy).id
+                } catch {
+                    if case .web = target {
+                        // TDLib errors for WEB can contain sensitive configuration.
+                        throw ServiceError.telegram(localizedUI("Telegram could not enable the WEB proxy."))
+                    }
+                    throw error
+                }
             } else {
                 _ = try await client.disableProxy()
             }
@@ -221,21 +264,9 @@ actor TelegramService {
     }
 
     func testConnectionProxy(_ proxy: SOCKS5ProxyConfiguration) async throws {
-        guard proxy.isValid, let port = Int(proxy.normalized.port) else {
-            throw ServiceError.telegram("Invalid SOCKS5 proxy settings.")
-        }
+        let selected = try ConnectionProxy.socks5(proxy).tdlibProxy()
         do {
-            let client = try await requireClient()
-            let selected = Proxy(port: port, server: proxy.normalized.server, type: .proxyTypeSocks5(
-                ProxyTypeSocks5(password: proxy.password, username: proxy.username)
-            ))
-            // Let TDLib choose its latency probe target instead of forcing DC2.
-            // Bound the callback: one slow probe must not hang the settings UI.
-            let seconds = try await VideoListRequest<Double>.run(timeout: .seconds(30)) { completion in
-                try client.pingProxy(proxy: selected) { result in
-                    completion(result.map { $0.seconds })
-                }
-            }
+            let seconds = try await pingConnectionProxy(selected)
             PlaybackDiagnostics.log("telegram_proxy_test_complete method=pingProxy seconds=\(seconds)")
         } catch {
             let readable = readableLoginError(error)
@@ -247,7 +278,34 @@ actor TelegramService {
         }
     }
 
+    func testConnectionWebProxy(_ proxy: WebProxyConfiguration) async throws {
+        let selected = try ConnectionProxy.web(proxy).tdlibProxy()
+        do {
+            _ = try await pingConnectionProxy(selected)
+        } catch {
+            throw ServiceError.telegram(localizedUI("Could not reach Telegram through the WEB proxy. Check its address, path, and secret."))
+        }
+    }
+
+    private func pingConnectionProxy(_ proxy: Proxy) async throws -> Double {
+        let client = try await requireClient()
+        // TDLib chooses the latency probe target. Bound the wait for a slow proxy.
+        return try await VideoListRequest<Double>.run(timeout: .seconds(30)) { completion in
+            try client.pingProxy(proxy: proxy) { result in
+                completion(result.map { $0.seconds })
+            }
+        }
+    }
+
     func connectionProxyIsApplied(_ proxy: SOCKS5ProxyConfiguration?) -> Bool {
+        connectionProxyIsApplied(proxy.map { .socks5($0.normalized) })
+    }
+
+    func connectionWebProxyIsApplied(_ proxy: WebProxyConfiguration) -> Bool {
+        connectionProxyIsApplied(.web(proxy.normalized))
+    }
+
+    private func connectionProxyIsApplied(_ proxy: ConnectionProxy?) -> Bool {
         guard let client, proxyClientReady else { return false }
         return proxyClientID == client.id && appliedProxy == proxy
     }
@@ -1903,10 +1961,18 @@ actor TelegramService {
         let initializationAccountID = accountID
         let manager = self.manager ?? TDLibClientManager()
         self.manager = manager
-        let created = manager.createClient(updateHandler: { [weak self] data, sourceClient in
-            let sourceID = sourceClient.id
-            Task.detached { [weak self, data] in await self?.receiveClientUpdate(data, from: sourceID) }
-        })
+        // TDLib delivers updates serially. Preserve that order across the actor
+        // hop so carrier data cannot overtake its open or close event.
+        let (updates, continuation) = AsyncStream<Data>.makeStream()
+        let created = manager.createClient(updateHandler: { data, _ in continuation.yield(data) })
+        let sourceID = created.id
+        clientUpdateTask?.cancel()
+        clientUpdateTask = Task { [weak self] in
+            for await data in updates {
+                guard let self else { return }
+                await self.receiveClientUpdate(data, from: sourceID)
+            }
+        }
         proxyClientReady = false
         client = created
         var initializationStage = "getAuthorizationState"
@@ -1946,7 +2012,7 @@ actor TelegramService {
             // apply before issuing any login or media request.
             proxyClientReady = true
             initializationStage = "applyConnectionProxy"
-            try await setConnectionProxy(desiredProxy)
+            try await applyConnectionProxy(desiredProxy)
             guard client?.id == created.id, accountID == initializationAccountID else { throw CancellationError() }
             authorizationState = state
             if case .authorizationStateReady = state {
@@ -1967,6 +2033,8 @@ actor TelegramService {
             PlaybackDiagnostics.log("telegram_client_initialization_failed stage=\(initializationStage) tdlibCode=\(tdlibCode)", error: readableError)
             client = nil
             proxyClientReady = false
+            clientUpdateTask?.cancel()
+            await closeWebProxyCarriers(for: created.id)
             _ = try? await created.close()
             throw readableLoginError(error)
         }
@@ -2055,6 +2123,7 @@ actor TelegramService {
         client = nil
         proxyClientReady = false
         connectionState = "connectionStateConnecting"
+        await closeWebProxyCarriers(for: expectedClientID)
         PlaybackDiagnostics.log("telegram_foreground_reconnect_start client=\(expectedClientID)")
         // A close result acknowledges the request, not the end of database use.
         // Keep media session handles: the reopened client uses the same database.
@@ -2082,7 +2151,7 @@ actor TelegramService {
         PlaybackDiagnostics.log("telegram_foreground_reconnect_reopened client=\(reopened.id) state=\(connectionState)")
     }
 
-    private func receiveClientUpdate(_ data: Data, from sourceID: Int32) {
+    private func receiveClientUpdate(_ data: Data, from sourceID: Int32) async {
         guard client?.id == sourceID else {
             // The old client remains capable of delivering queued callbacks.
             // Only its final Closed acknowledgement belongs to the recovery.
@@ -2096,7 +2165,7 @@ actor TelegramService {
             }
             return
         }
-        receiveUpdate(data)
+        await receiveUpdate(data)
     }
 
     // Read TDLib's actual state without starting another connection or request.
@@ -2118,8 +2187,31 @@ actor TelegramService {
         connectionStateObservers.removeValue(forKey: id)
     }
 
-    private func receiveUpdate(_ data: Data) {
+    private func receiveUpdate(_ data: Data) async {
         guard let client, let update = try? client.decoder.decode(Update.self, from: data) else { return }
+        switch update {
+        case let .updateWebProxyCarrierOpened(value):
+            guard case let .web(proxy)? = desiredProxy,
+                  value.carrier.origin == "https://\(proxy.server)",
+                  value.carrier.pathPrefix == (proxy.path.isEmpty ? "/" : "/\(proxy.path)/") else {
+                // TDLib may request the previously persisted proxy while its
+                // database opens, before Telisten has applied today's selection.
+                let reason: WebProxyCarrierError = value.carrier.isTemporary
+                    ? .webProxyCarrierErrorRefused : .webProxyCarrierErrorPaused
+                try? client.reportWebProxyCarrierError(carrierId: value.carrier.id, error: reason) { _ in }
+                return
+            }
+            await webProxyCarriers.open(value.carrier, client: client)
+            return
+        case let .updateWebProxyCarrierData(value):
+            await webProxyCarriers.deliver(value.data, carrierID: value.carrierId, clientID: client.id)
+            return
+        case let .updateWebProxyCarrierClosed(value):
+            await webProxyCarriers.close(carrierID: value.carrierId, clientID: client.id)
+            return
+        default:
+            break
+        }
         if case let .updateConnectionState(value) = update {
             connectionState = String(describing: value.state)
             PlaybackDiagnostics.log("telegram_connection_state client=\(client.id) state=\(connectionState)")
@@ -2551,7 +2643,13 @@ actor TelegramService {
         guard let client else { return }
         self.client = nil
         proxyClientReady = false
+        clientUpdateTask?.cancel()
+        await closeWebProxyCarriers(for: client.id)
         _ = try? await client.close()
+    }
+
+    private func closeWebProxyCarriers(for clientID: Int32) async {
+        await webProxyCarriers.closeAll(clientID: clientID)
     }
 
     private func storageURL(for id: String) -> URL {

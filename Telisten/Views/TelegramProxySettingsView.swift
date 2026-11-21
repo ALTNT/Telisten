@@ -14,6 +14,7 @@ struct TelegramProxySettingsView: View {
                     Picker("Mode", selection: $draft.mode) {
                         Text("Direct / System VPN").tag(TelegramProxyConfiguration.Mode.direct)
                         Text("SOCKS5 proxy").tag(TelegramProxyConfiguration.Mode.proxy)
+                        Text("WEB proxy").tag(TelegramProxyConfiguration.Mode.web)
                         Text("Automatic by Wi-Fi").tag(TelegramProxyConfiguration.Mode.automatic)
                     }
                     LabeledContent("Applied connection", value: controller.status)
@@ -78,6 +79,18 @@ struct TelegramProxySettingsView: View {
                 if draft.mode == .proxy || (draft.mode == .automatic && draft.useProxyForOtherNetworks) {
                     Section("SOCKS5 server") { proxyFields($draft.proxy) }
                 }
+                if draft.mode == .web {
+                    Section {
+                        webProxyFields(Binding(
+                            get: { draft.webProxy ?? WebProxyConfiguration() },
+                            set: { draft.webProxy = $0 }
+                        ))
+                    } header: {
+                        Text("WEB proxy server")
+                    } footer: {
+                        Text("This proxy runs a page from its provider in the background while connected. Use a provider you trust.")
+                    }
+                }
                 if let error = controller.errorMessage {
                     Section { Text(error).foregroundStyle(.red) }
                 }
@@ -117,6 +130,18 @@ struct TelegramProxySettingsView: View {
             .frame(minWidth: 480, minHeight: 540)
             #endif
         }
+    }
+
+    private func webProxyFields(_ proxy: Binding<WebProxyConfiguration>) -> some View {
+        Group {
+            TextField("Domain name", text: proxy.server)
+            TextField("Path (optional)", text: proxy.path)
+            SecureField("Secret", text: proxy.secret)
+        }
+        .autocorrectionDisabled()
+        #if os(iOS) || os(visionOS)
+        .textInputAutocapitalization(.never)
+        #endif
     }
 
     private func proxyFields(_ proxy: Binding<SOCKS5ProxyConfiguration>) -> some View {

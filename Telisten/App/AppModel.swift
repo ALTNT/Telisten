@@ -133,6 +133,10 @@ final class AppModel: ObservableObject {
     private let localLibrary: LocalLibraryStore
     private let importedPlaylistStore = ImportedPlaylistStore()
     private var importedPlaybackTask: Task<Void, Never>?
+    private var importedPlaybackSelection: Set<String>?
+    private var importedPrefetchTask: Task<Void, Never>?
+    private var importedNextEntryID: String?
+    private var importedPreparation: (id: UUID, playlistID: String, entryID: String, task: Task<Track, Error>)?
     private var importedPlaybackOperationID: UUID?
     private var isStartingImportedTrack = false
     private var isApplyingImportedSync = false
@@ -233,6 +237,12 @@ final class AppModel: ObservableObject {
                 Task { @MainActor [weak self] in
                     self?.objectWillChange.send()
                 }
+            }
+            .store(in: &cancellables)
+        player.$isPlaying.removeDuplicates()
+            .sink { [weak self] isPlaying in
+                guard isPlaying else { return }
+                Task { @MainActor [weak self] in self?.prefetchImportedNextTrack() }
             }
             .store(in: &cancellables)
         player.onFinished = { [weak self] in self?.trackFinished() }
@@ -930,17 +940,23 @@ final class AppModel: ObservableObject {
     }
 
     func setImportedSource(_ track: Track?, playlistID: String, entryID: String) {
+        do { try saveImportedSource(track, playlistID: playlistID, entryID: entryID) }
+        catch is CancellationError { return }
+        catch { errorMessage = UserFacingError.message(for: error) }
+    }
+
+    private func saveImportedSource(_ track: Track?, playlistID: String, entryID: String) throws {
         guard let index = importedPlaylists.firstIndex(where: { $0.id == playlistID }),
-              let entryIndex = importedPlaylists[index].entries.firstIndex(where: { $0.id == entryID }) else { return }
+              let entryIndex = importedPlaylists[index].entries.firstIndex(where: { $0.id == entryID }) else {
+            throw CancellationError()
+        }
         var values = importedPlaylists
         values[index].entries[entryIndex].track = track
-        do {
-            try saveImportedPlaylistState(values, change: .source(playlistID: playlistID,
-                songID: values[index].entries[entryIndex].songID, source: track.map(ImportedAudioSource.init)))
-            importedPlaylists = values
-            importedPlaylistErrors[playlistID]?[entryID] = nil
-            if let track { install([track]) }
-        } catch { errorMessage = UserFacingError.message(for: error) }
+        try saveImportedPlaylistState(values, change: .source(playlistID: playlistID,
+            songID: values[index].entries[entryIndex].songID, source: track.map(ImportedAudioSource.init)))
+        importedPlaylists = values
+        importedPlaylistErrors[playlistID]?[entryID] = nil
+        if let track { install([track]) }
     }
 
     func importedAudioCandidates() async throws -> [Track] {
@@ -949,27 +965,53 @@ final class AppModel: ObservableObject {
     }
 
     func cancelImportedPlayback() {
+        if let preparation = importedPreparation,
+           preparation.playlistID == playingImportedPlaylistID,
+           preparation.entryID == resolvingImportedEntryID {
+            preparation.task.cancel()
+        }
         importedPlaybackTask?.cancel()
         importedPlaybackTask = nil
         importedPlaybackOperationID = nil
         resolvingImportedEntryID = nil
         playingImportedPlaylistID = nil
         playingImportedEntryID = nil
+        importedPlaybackSelection = nil
+        importedNextEntryID = nil
+        importedPrefetchTask?.cancel()
+        importedPrefetchTask = nil
     }
 
     func playImportedEntry(_ entryID: String, in playlistID: String) {
-        guard resolvingImportedEntryID == nil,
-              let playlist = importedPlaylists.first(where: { $0.id == playlistID }),
-              let entry = playlist.entries.first(where: { $0.id == entryID }) else { return }
-        let syncedSource = importedPlaylistSyncState.source(playlistID: playlistID, songID: entry.songID)
-        guard entry.track != nil || syncedSource != nil || !isBotSearching else {
-            errorMessage = "Wait for the current bot search to finish before requesting a playlist song."
-            return
+        startImportedEntry(entryID, in: playlistID, selection: nil, automatically: false)
+    }
+
+    func playImportedEntries(_ entryIDs: Set<String>, in playlistID: String) {
+        guard let playlist = importedPlaylists.first(where: { $0.id == playlistID }) else { return }
+        let entries = playlist.entries.filter { entryIDs.contains($0.id) }
+        let first = switch playbackMode {
+        case .reverseOrder: entries.last
+        case .shuffle: entries.randomElement()
+        case .order, .repeatOne: entries.first
         }
-        let config = searchBots.first { $0.id == importedPlaylistBotID }
-        guard entry.track != nil || syncedSource != nil || config != nil else {
-            errorMessage = "Choose a MusicBot in Imported playlists before playing an unresolved song."
-            return
+        guard let first else { return }
+        startImportedEntry(first.id, in: playlistID, selection: entryIDs, automatically: false)
+    }
+
+    private func startImportedEntry(_ entryID: String, in playlistID: String,
+                                    selection: Set<String>?, automatically: Bool) {
+        guard resolvingImportedEntryID == nil,
+              let entry = importedPlaylists.first(where: { $0.id == playlistID })?.entries.first(where: { $0.id == entryID })
+        else { return }
+        if entry.track == nil, importedPlaylistSyncState.source(playlistID: playlistID, songID: entry.songID) == nil {
+            guard !isBotSearching else {
+                errorMessage = "Wait for the current bot search to finish before requesting a playlist song."
+                return
+            }
+            guard searchBots.contains(where: { $0.id == importedPlaylistBotID }) else {
+                errorMessage = "Choose a MusicBot in Imported playlists before playing an unresolved song."
+                return
+            }
         }
         cancelImportedPlayback()
         importedPlaylistErrors[playlistID]?[entryID] = nil
@@ -979,6 +1021,7 @@ final class AppModel: ObservableObject {
         resolvingImportedEntryID = entryID
         playingImportedPlaylistID = playlistID
         playingImportedEntryID = entryID
+        importedPlaybackSelection = selection
         // Stop an earlier transfer from loading its player after this request.
         playbackTask?.cancel()
         player.reset()
@@ -992,67 +1035,160 @@ final class AppModel: ObservableObject {
                     resolvingImportedEntryID = nil
                 }
             }
-            do {
-                let track: Track
-                if let existing = entry.track {
-                    track = existing
-                } else {
-                    let restored: Track?
-                    if let syncedSource, let accountID {
-                        restored = try await telegram.restoreImportedAudioSource(syncedSource, expectedAccountID: accountID)
-                    } else { restored = nil }
-                    if let restored { track = restored }
-                    else if let config { track = try await telegram.resolveImportedMusic(entry, using: config) }
-                    else { throw ImportedMusicError.unavailable("The synced audio is no longer accessible. Choose a MusicBot or another received audio file.") }
+            if automatically {
+                PlaybackDiagnostics.log("imported_music_automatic_advance")
+                await withAutomaticPlaybackTime {
+                    await self.finishImportedEntryStart(entryID, in: playlistID, accountID: accountID,
+                                                        operationID: operationID, waitForPlayback: true)
                 }
-                guard !Task.isCancelled, activeAccountID == accountID,
-                      importedPlaybackOperationID == operationID,
-                      let index = importedPlaylists.firstIndex(where: { $0.id == playlistID }),
-                      let entryIndex = importedPlaylists[index].entries.firstIndex(where: { $0.id == entryID }) else { return }
-                var values = importedPlaylists
-                values[index].entries[entryIndex].track = track
-                try saveImportedPlaylistState(values, change: .source(playlistID: playlistID,
-                    songID: entry.songID, source: ImportedAudioSource(track)))
-                importedPlaylists = values
-                install([track])
-                // Imported entries keep their own queue identity. Only resolved
-                // Telegram files enter the existing player's Track queue.
-                isStartingImportedTrack = true
-                play(track, from: [track])
-                isStartingImportedTrack = false
-            } catch is CancellationError {
-                return
-            } catch let error as ImportedMusicError {
-                guard !Task.isCancelled, activeAccountID == accountID, importedPlaybackOperationID == operationID else { return }
-                // Availability belongs to this entry, not the whole playlist.
-                // Keep it transient so a later explicit tap can retry normally.
-                importedPlaylistErrors[playlistID, default: [:]][entryID] = error.localizedDescription
-                playingImportedPlaylistID = nil
-                playingImportedEntryID = nil
-            } catch {
-                guard activeAccountID == accountID, importedPlaybackOperationID == operationID else { return }
-                playingImportedPlaylistID = nil
-                playingImportedEntryID = nil
-                errorMessage = UserFacingError.message(for: error)
+            } else {
+                await finishImportedEntryStart(entryID, in: playlistID, accountID: accountID,
+                                               operationID: operationID, waitForPlayback: false)
             }
         }
     }
 
-    private func advanceImportedTrack(backwards: Bool) {
-        guard resolvingImportedEntryID == nil,
-              let playlist = importedPlaylists.first(where: { $0.id == playingImportedPlaylistID }),
-              let current = playlist.entries.firstIndex(where: { $0.id == playingImportedEntryID }) else { return }
+    private func finishImportedEntryStart(_ entryID: String, in playlistID: String, accountID: String?,
+                                          operationID: UUID, waitForPlayback: Bool) async {
+        guard !Task.isCancelled, activeAccountID == accountID,
+              importedPlaybackOperationID == operationID else { return }
+        do {
+            let track = try await prepareImportedTrack(entryID, in: playlistID)
+            guard !Task.isCancelled, activeAccountID == accountID,
+                  importedPlaybackOperationID == operationID else { return }
+            isStartingImportedTrack = true
+            play(track, from: [track])
+            isStartingImportedTrack = false
+            if waitForPlayback {
+                await waitForPlaybackStart(of: track, until: .now.advanced(by: Self.automaticPlaybackStartTimeout))
+            }
+        } catch is CancellationError {
+            return
+        } catch let error as ImportedMusicError {
+            guard !Task.isCancelled, activeAccountID == accountID, importedPlaybackOperationID == operationID else { return }
+            importedPlaylistErrors[playlistID, default: [:]][entryID] = error.localizedDescription
+            playingImportedPlaylistID = nil
+            playingImportedEntryID = nil
+        } catch {
+            guard !Task.isCancelled, activeAccountID == accountID, importedPlaybackOperationID == operationID else { return }
+            playingImportedPlaylistID = nil
+            playingImportedEntryID = nil
+            errorMessage = UserFacingError.message(for: error)
+        }
+    }
+
+    func prepareImportedTrack(_ entryID: String, in playlistID: String) async throws -> Track {
+        let accountID = activeAccountID
+        // Share an in-flight match across prefetch, playback and batch actions.
+        // Serializing different songs also avoids overlapping commands to the bot.
+        while true {
+            try Task.checkCancellation()
+            guard activeAccountID == accountID,
+                  let entry = importedPlaylists.first(where: { $0.id == playlistID })?.entries.first(where: { $0.id == entryID })
+            else { throw CancellationError() }
+            if let track = entry.track { return track }
+            if let current = importedPreparation {
+                if current.playlistID == playlistID, current.entryID == entryID {
+                    return try await current.task.value
+                }
+                _ = await current.task.result
+                continue
+            }
+            let syncedSource = importedPlaylistSyncState.source(playlistID: playlistID, songID: entry.songID)
+            let preparationID = UUID()
+            let task = Task<Track, Error> { [weak self] in
+                guard let self else { throw CancellationError() }
+                defer {
+                    if importedPreparation?.id == preparationID { importedPreparation = nil }
+                }
+                try Task.checkCancellation()
+                guard activeAccountID == accountID else { throw CancellationError() }
+                let restored: Track?
+                if let syncedSource, let accountID {
+                    restored = try await telegram.restoreImportedAudioSource(syncedSource, expectedAccountID: accountID)
+                } else { restored = nil }
+                let track: Track
+                if let restored {
+                    track = restored
+                } else {
+                    try Task.checkCancellation()
+                    guard activeAccountID == accountID else { throw CancellationError() }
+                    guard !isBotSearching else {
+                        throw ImportedMusicError.unavailable("Wait for the current bot search to finish before requesting a playlist song.")
+                    }
+                    guard let config = searchBots.first(where: { $0.id == importedPlaylistBotID }) else {
+                        throw ImportedMusicError.unavailable("Choose a MusicBot in Imported playlists before playing an unresolved song.")
+                    }
+                    track = try await telegram.resolveImportedMusic(entry, using: config)
+                }
+                try Task.checkCancellation()
+                guard activeAccountID == accountID,
+                      let latest = importedPlaylists.first(where: { $0.id == playlistID })?.entries.first(where: { $0.id == entryID }),
+                      latest.songURL == entry.songURL else { throw CancellationError() }
+                if let replacement = latest.track { return replacement }
+                guard importedPlaylistSyncState.source(playlistID: playlistID, songID: entry.songID) == syncedSource else {
+                    throw CancellationError()
+                }
+                try saveImportedSource(track, playlistID: playlistID, entryID: entryID)
+                return track
+            }
+            importedPreparation = (preparationID, playlistID, entryID, task)
+            return try await task.value
+        }
+    }
+
+    private func nextImportedEntry(in playlist: ImportedPlaylist, backwards: Bool) -> ImportedPlaylistEntry? {
+        let entries = playlist.entries.filter { importedPlaybackSelection?.contains($0.id) ?? true }
+        guard let current = entries.firstIndex(where: { $0.id == playingImportedEntryID }) else { return nil }
         let index: Int
         switch playbackMode {
         case .shuffle:
-            index = playlist.entries.indices.filter { $0 != current }.randomElement() ?? current
+            if !backwards, let prepared = entries.first(where: { $0.id == importedNextEntryID }) { return prepared }
+            index = entries.indices.filter { $0 != current }.randomElement() ?? current
         case .order, .repeatOne:
             index = current + (backwards ? -1 : 1)
         case .reverseOrder:
             index = current + (backwards ? 1 : -1)
         }
-        guard playlist.entries.indices.contains(index) else { return }
-        playImportedEntry(playlist.entries[index].id, in: playlist.id)
+        return entries.indices.contains(index) ? entries[index] : nil
+    }
+
+    private func advanceImportedTrack(backwards: Bool, automatically: Bool = false) {
+        guard resolvingImportedEntryID == nil,
+              let playlist = importedPlaylists.first(where: { $0.id == playingImportedPlaylistID }),
+              let next = nextImportedEntry(in: playlist, backwards: backwards) else { return }
+        startImportedEntry(next.id, in: playlist.id, selection: importedPlaybackSelection, automatically: automatically)
+    }
+
+    private func prefetchImportedNextTrack() {
+        guard importedPrefetchTask == nil, player.isPlaying, playbackMode != .repeatOne,
+              let playlist = importedPlaylists.first(where: { $0.id == playingImportedPlaylistID }),
+              let current = playlist.entries.first(where: { $0.id == playingImportedEntryID }),
+              let currentTrack = current.track, currentTrack.id == player.track?.id,
+              let next = nextImportedEntry(in: playlist, backwards: false), next.id != current.id else { return }
+        let operationID = importedPlaybackOperationID
+        let accountID = activeAccountID
+        importedNextEntryID = next.id
+        importedPrefetchTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if !Task.isCancelled, importedPlaybackOperationID == operationID { importedPrefetchTask = nil }
+            }
+            do {
+                try Task.checkCancellation()
+                guard activeAccountID == accountID, importedPlaybackOperationID == operationID else { return }
+                PlaybackDiagnostics.log("imported_music_prefetch_start")
+                let track = try await prepareImportedTrack(next.id, in: playlist.id)
+                guard !Task.isCancelled, importedPlaybackOperationID == operationID else { return }
+                _ = try await cachedFile(for: track)
+                if !Task.isCancelled { PlaybackDiagnostics.log("imported_music_prefetch_cached") }
+            } catch is CancellationError {
+                return
+            } catch {
+                // Playback will surface a preparation error if the song is requested again.
+                if !Task.isCancelled { PlaybackDiagnostics.log("imported_music_prefetch_failed") }
+            }
+        }
     }
 
     func loadMoreTracks() async {
@@ -2238,7 +2374,7 @@ final class AppModel: ObservableObject {
 
     private func advanceQueue(automatically: Bool) {
         if playingImportedPlaylistID != nil {
-            advanceImportedTrack(backwards: false)
+            advanceImportedTrack(backwards: false, automatically: automatically)
             return
         }
         guard !queue.isEmpty else { return }
@@ -2282,13 +2418,19 @@ final class AppModel: ObservableObject {
     }
 
     func cyclePlaybackMode() {
-        playbackMode = playbackMode.next
-        persistLibrary()
+        setPlaybackMode(playbackMode.next)
     }
 
     func setPlaybackMode(_ mode: PlaybackMode) {
+        let changed = playbackMode != mode
         playbackMode = mode
         persistLibrary()
+        if changed, playingImportedPlaylistID != nil {
+            importedNextEntryID = nil
+            importedPrefetchTask?.cancel()
+            importedPrefetchTask = nil
+            prefetchImportedNextTrack()
+        }
     }
 
     private func playQueueTrack(at index: Int, automaticallyAdvancingFrom previousTrackID: String? = nil) {
@@ -2324,6 +2466,12 @@ final class AppModel: ObservableObject {
     }
 
     private func prepareAutomaticPlayback(_ track: Track, previousTrackID: String) async -> Track? {
+        await withAutomaticPlaybackTime {
+            await prepareAndPlay(track, automaticallyAdvancingFrom: previousTrackID)
+        }
+    }
+
+    private func withAutomaticPlaybackTime<Result>(_ operation: @MainActor () async -> Result) async -> Result {
         #if os(iOS)
         // The old item has ended, so keep the app running during the gap before the next item starts.
         var backgroundTask = UIBackgroundTaskIdentifier.invalid
@@ -2338,7 +2486,7 @@ final class AppModel: ObservableObject {
         }
         defer { endBackgroundTask() }
         #endif
-        return await prepareAndPlay(track, automaticallyAdvancingFrom: previousTrackID)
+        return await operation()
     }
 
     private func prepareAndPlay(_ track: Track, automaticallyAdvancingFrom previousTrackID: String? = nil) async -> Track? {
@@ -2948,6 +3096,8 @@ final class AppModel: ObservableObject {
         importedPlaylistSyncState = ImportedPlaylistSyncState()
         importedSyncNeedsAnotherPass = false
         cancelImportedPlayback()
+        importedPreparation?.task.cancel()
+        importedPreparation = nil
         importedPlaylists = []
         importedPlaylistErrors = [:]
         playbackTask?.cancel()

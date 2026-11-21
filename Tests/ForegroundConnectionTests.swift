@@ -43,15 +43,16 @@ private actor ForegroundConnectionHarness {
             Task { await self?.deliverClosed() }
         }
     }
-    func deliverClosed() {
-        receiveClientUpdate(Data(#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateClosed"}}"#.utf8), from: 1)
+    func deliverClosed() async {
+        await receiveClientUpdate(Data(#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateClosed"}}"#.utf8), from: 1)
     }
-    func deliverUpdate(from id: Int32) { receiveClientUpdate(Data("{}".utf8), from: id) }
+    func deliverUpdate(from id: Int32) async { await receiveClientUpdate(Data("{}".utf8), from: id) }
     func setState(_ state: String) { connectionState = state }
     func changeAccount() { accountID = "different" }
     func clearAuthorization() { authorizationState = nil }
     func readableLoginError(_ error: Error) -> Error { error }
-    func receiveUpdate(_ data: Data) { acceptedUpdates += 1 }
+    func receiveUpdate(_ data: Data) async { acceptedUpdates += 1 }
+    func closeWebProxyCarriers(for clientID: Int32) async {}
     func requireReadyClient() async throws -> ForegroundTestClient {
         guard !reconnectingClient, closingClientID == nil else { throw ServiceError.noConnection }
         let opened = ForegroundTestClient(id: 2)

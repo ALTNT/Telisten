@@ -1,6 +1,358 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Play all": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Play all"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "播放全部"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "播放全部"
+          }
+        }
+      }
+    },
+    "Preparing selected audio…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparing selected audio…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在准备所选歌曲的音频…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在準備所選歌曲的音訊…"
+          }
+        }
+      }
+    },
+    "Could not prepare %lld selected songs.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not prepare %lld selected songs."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法准备所选歌曲中的 %lld 首。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法準備所選歌曲中的 %lld 首。"
+          }
+        }
+      }
+    },
+    "Import saves the song list. Telegram sync shares it with your other devices. During playback, Telisten prepares the next song in advance.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import saves the song list. Telegram sync shares it with your other devices. During playback, Telisten prepares the next song in advance."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "导入会保存歌曲列表。Telegram 同步会将歌单同步到你的其他设备。播放时，Telisten 会提前准备下一首歌。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "匯入會儲存歌曲清單。Telegram 同步會將歌單同步到你的其他裝置。播放時，Telisten 會提前準備下一首歌。"
+          }
+        }
+      }
+    },
+    "WEB proxy": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WEB proxy"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WEB 代理"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WEB 代理"
+          }
+        }
+      }
+    },
+    "WEB proxy server": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WEB proxy server"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WEB 代理服务器"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WEB 代理伺服器"
+          }
+        }
+      }
+    },
+    "Domain name": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Domain name"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "域名"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "網域名稱"
+          }
+        }
+      }
+    },
+    "Path (optional)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Path (optional)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "路径（选填）"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "路徑（選填）"
+          }
+        }
+      }
+    },
+    "Secret": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Secret"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "密钥"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "密鑰"
+          }
+        }
+      }
+    },
+    "This proxy runs a page from its provider in the background while connected. Use a provider you trust.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This proxy runs a page from its provider in the background while connected. Use a provider you trust."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连接期间，代理会在后台运行服务商提供的网页。请使用你信任的服务商。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "連線期間，代理會在背景執行服務商提供的網頁。請使用你信任的服務商。"
+          }
+        }
+      }
+    },
+    "Enter a valid WEB proxy domain, optional path, and secret.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter a valid WEB proxy domain, optional path, and secret."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请输入有效的 WEB 代理域名、可选路径和密钥。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請輸入有效的 WEB 代理網域、選填路徑和密鑰。"
+          }
+        }
+      }
+    },
+    "Invalid WEB proxy settings.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Invalid WEB proxy settings."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WEB 代理设置无效。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WEB 代理設定無效。"
+          }
+        }
+      }
+    },
+    "Telegram could not enable the WEB proxy.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Telegram could not enable the WEB proxy."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Telegram 无法启用 WEB 代理。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Telegram 無法啟用 WEB 代理。"
+          }
+        }
+      }
+    },
+    "Testing the WEB proxy and Telegram connection…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Testing the WEB proxy and Telegram connection…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在测试 WEB 代理和 Telegram 连接…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在測試 WEB 代理和 Telegram 連線…"
+          }
+        }
+      }
+    },
+    "WEB proxy and Telegram connection succeeded.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WEB proxy and Telegram connection succeeded."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WEB 代理和 Telegram 连接成功。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WEB 代理和 Telegram 連線成功。"
+          }
+        }
+      }
+    },
+    "Could not reach Telegram through the WEB proxy. Check its address, path, and secret.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not reach Telegram through the WEB proxy. Check its address, path, and secret."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法通过 WEB 代理连接 Telegram。请检查域名、路径和密钥。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法透過 WEB 代理連線到 Telegram。請檢查網域、路徑和密鑰。"
+          }
+        }
+      }
+    },
     "Advanced": {
       "localizations": {
         "en": {
