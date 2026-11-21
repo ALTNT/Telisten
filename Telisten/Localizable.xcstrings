@@ -29473,82 +29473,30 @@
         }
       }
     },
-    "Playlist sync": {
+    "Telegram sync": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Playlist sync"
+            "value": "Telegram sync"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "歌单同步"
+            "value": "Telegram 同步"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "歌單同步"
+            "value": "Telegram 同步"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "プレイリスト同期"
-          }
-        },
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Đồng bộ danh sách"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Synchronisation des playlists"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sincronización de listas"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "재생목록 동기화"
-          }
-        }
-      }
-    },
-    "Sync using Telegram": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sync using Telegram"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "通过 Telegram 同步"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "透過 Telegram 同步"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Telegram で同期"
+            "value": "Telegram 同期"
           }
         },
         "vi": {
@@ -29560,71 +29508,331 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Synchroniser via Telegram"
+            "value": "Synchronisation Telegram"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Sincronizar con Telegram"
+            "value": "Sincronización con Telegram"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "Telegram으로 동기화"
+            "value": "Telegram 동기화"
           }
         }
       }
     },
-    "Syncing playlists…": {
+    "Sync imported playlists": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Syncing playlists…"
+            "value": "Sync imported playlists"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在同步歌单…"
+            "value": "同步导入的播放列表"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在同步歌單…"
+            "value": "同步匯入的播放清單"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "プレイリストを同期中…"
+            "value": "インポートしたプレイリストを同期"
           }
         },
         "vi": {
           "stringUnit": {
             "state": "translated",
-            "value": "Đang đồng bộ danh sách…"
+            "value": "Đồng bộ danh sách đã nhập"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Synchronisation des playlists…"
+            "value": "Synchroniser les playlists importées"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Sincronizando listas…"
+            "value": "Sincronizar listas importadas"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "재생목록 동기화 중…"
+            "value": "가져온 재생목록 동기화"
+          }
+        }
+      }
+    },
+    "Sync Favorites": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync Favorites"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步收藏夹"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步收藏夾"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "お気に入りを同期"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Đồng bộ mục yêu thích"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synchroniser les favoris"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sincronizar favoritos"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "즐겨찾기 동기화"
+          }
+        }
+      }
+    },
+    "Syncing…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Syncing…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在同步…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在同步…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同期中…"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Đang đồng bộ…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synchronisation…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sincronizando…"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "동기화 중…"
+          }
+        }
+      }
+    },
+    "Imported playlists last synced": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Imported playlists last synced"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "导入歌单上次同步"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "匯入歌單上次同步"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "インポートしたプレイリストの最終同期"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lần cuối đồng bộ danh sách đã nhập"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dernière synchronisation des playlists importées"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Última sincronización de listas importadas"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "가져온 재생목록의 마지막 동기화"
+          }
+        }
+      }
+    },
+    "Favorites last synced": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Favorites last synced"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收藏夹上次同步"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收藏夾上次同步"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "お気に入りの最終同期"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lần cuối đồng bộ mục yêu thích"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dernière synchronisation des favoris"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Última sincronización de favoritos"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "즐겨찾기의 마지막 동기화"
+          }
+        }
+      }
+    },
+    "Favorites awaiting audio recovery: %lld": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Favorites awaiting audio recovery: %lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待恢复音源的收藏歌曲：%lld 首"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待還原音源的收藏歌曲：%lld 首"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "音源の復元待ちのお気に入り：%lld 曲"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mục yêu thích đang chờ khôi phục âm thanh: %lld"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Favoris en attente de récupération audio : %lld"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Favoritos pendientes de recuperar el audio: %lld"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "오디오 복원 대기 중인 즐겨찾기: %lld개"
           }
         }
       }

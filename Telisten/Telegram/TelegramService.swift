@@ -987,6 +987,82 @@ actor TelegramService {
 
     func pullImportedPlaylistSync(chatID: Int64, after messageID: Int64, ownerID: Int64,
                                   expectedAccountID: String) async throws -> ImportedPlaylistSyncPull {
+        let (records, newest) = try await pullSyncDocuments(chatID: chatID, after: messageID, ownerID: ownerID,
+            expectedAccountID: expectedAccountID, marker: ImportedPlaylistSyncEnvelope.marker,
+            filenamePrefix: "telisten-playlist-sync-") { data, caption in
+            let envelope = try ImportedPlaylistSyncEnvelope.decode(data, ownerUserID: ownerID)
+            guard caption == "\(ImportedPlaylistSyncEnvelope.marker) \(envelope.id)" else {
+                throw ImportedPlaylistSyncError.invalidData
+            }
+            return envelope.records
+        }
+        return ImportedPlaylistSyncPull(records: records, lastMessageID: newest)
+    }
+
+    func pullFavoriteSync(chatID: Int64, after messageID: Int64, ownerID: Int64,
+                          expectedAccountID: String) async throws -> FavoriteSyncPull {
+        let client = try await requireReadyClient()
+        try checkImportedSyncAccount(expectedAccountID, client: client)
+        guard try await validateImportedSyncChannel(chatID, ownerID: ownerID, client: client) else {
+            throw ImportedPlaylistSyncError.unsafeChannel
+        }
+        var from: Int64 = 0
+        var newest = messageID
+        var seen: Set<Int64> = []
+        var records: [FavoriteSyncRecord] = []
+        repeat {
+            try checkImportedSyncAccount(expectedAccountID, client: client)
+            // Use the same unfiltered marker search as the channel index in
+            // Saved Messages. The document filter missed acknowledged uploads.
+            let page = try await client.searchChatMessages(chatId: chatID, filter: nil,
+                fromMessageId: from, limit: 100, offset: 0, query: FavoriteSyncEnvelope.marker, senderId: nil, topicId: nil)
+            for message in page.messages where message.id > messageID && message.sendingState == nil
+                && seen.insert(message.id).inserted {
+                guard let envelope = try await readFavoriteSyncMessage(message, ownerID: ownerID,
+                    expectedAccountID: expectedAccountID, client: client) else { continue }
+                records.append(contentsOf: envelope.records)
+                newest = max(newest, message.id)
+            }
+            let next = page.nextFromMessageId
+            if next <= messageID { break }
+            guard from == 0 || next < from else { throw ImportedPlaylistSyncError.invalidData }
+            from = next
+        } while true
+        // Newly delivered messages may not be searchable yet.
+        try checkImportedSyncAccount(expectedAccountID, client: client)
+        let latest = try await client.getChatHistory(chatId: chatID, fromMessageId: 0, limit: 100, offset: 0, onlyLocal: false)
+        for message in latest.messages ?? [] where message.id > messageID && message.sendingState == nil
+            && seen.insert(message.id).inserted {
+            guard let envelope = try await readFavoriteSyncMessage(message, ownerID: ownerID,
+                expectedAccountID: expectedAccountID, client: client) else { continue }
+            records.append(contentsOf: envelope.records)
+            newest = max(newest, message.id)
+        }
+        try checkImportedSyncAccount(expectedAccountID, client: client)
+        return FavoriteSyncPull(records: records, lastMessageID: newest)
+    }
+
+    private func readFavoriteSyncMessage(_ message: Message, ownerID: Int64, expectedAccountID: String,
+                                         client: TDLibClient) async throws -> FavoriteSyncEnvelope? {
+        switch message.content {
+        case let .messageText(content) where content.text.text.hasPrefix(FavoriteSyncEnvelope.marker + "\n"):
+            return try FavoriteSyncEnvelope.decodeText(content.text.text, ownerUserID: ownerID)
+        case let .messageDocument(content) where content.caption.text.hasPrefix(FavoriteSyncEnvelope.marker + " "):
+            let data = try await readSyncDocument(content.document.document, expectedAccountID: expectedAccountID, client: client)
+            let envelope = try JSONDecoder().decode(FavoriteSyncEnvelope.self, from: data)
+            try envelope.validate(ownerUserID: ownerID)
+            guard content.caption.text == "\(FavoriteSyncEnvelope.marker) \(envelope.id.uuidString)" else {
+                throw ImportedPlaylistSyncError.invalidData
+            }
+            return envelope
+        default:
+            return nil
+        }
+    }
+
+    private func pullSyncDocuments<Record>(chatID: Int64, after messageID: Int64, ownerID: Int64,
+                                           expectedAccountID: String, marker: String, filenamePrefix: String,
+                                           decode: (Data, String) throws -> [Record]) async throws -> ([Record], Int64) {
         let client = try await requireReadyClient()
         try checkImportedSyncAccount(expectedAccountID, client: client)
         guard try await validateImportedSyncChannel(chatID, ownerID: ownerID, client: client) else {
@@ -995,7 +1071,7 @@ actor TelegramService {
         var from: Int64 = 0
         var seen: Set<Int64> = []
         var newest = messageID
-        var records: [ImportedPlaylistSyncRecord] = []
+        var records: [Record] = []
         while true {
             try checkImportedSyncAccount(expectedAccountID, client: client)
             let page = try await client.getChatHistory(chatId: chatID, fromMessageId: from, limit: 100, offset: 0, onlyLocal: false)
@@ -1004,48 +1080,62 @@ actor TelegramService {
             for message in messages where message.sendingState == nil {
                 newest = max(newest, message.id)
                 guard case let .messageDocument(content) = message.content,
-                      content.caption.text.hasPrefix(ImportedPlaylistSyncEnvelope.marker + " "),
-                      content.document.fileName.hasPrefix("telisten-playlist-sync-") else { continue }
-                let file = content.document.document
-                guard max(file.size, file.expectedSize) <= Int64(ImportedPlaylistSyncEnvelope.maximumBytes) else {
-                    throw ImportedPlaylistSyncError.tooLarge
-                }
-                let local = try await client.downloadFile(fileId: file.id,
-                    limit: Int64(ImportedPlaylistSyncEnvelope.maximumBytes + 1), offset: 0, priority: 16, synchronous: true)
-                try checkImportedSyncAccount(expectedAccountID, client: client)
-                guard !local.local.path.isEmpty else { throw ServiceError.incompleteDownload }
-                let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: local.local.path))
-                let data: Data
-                do {
-                    defer { try? handle.close() }
-                    data = try handle.read(upToCount: ImportedPlaylistSyncEnvelope.maximumBytes + 1) ?? Data()
-                }
-                guard local.local.isDownloadingCompleted else { throw ServiceError.incompleteDownload }
-                let envelope = try ImportedPlaylistSyncEnvelope.decode(data, ownerUserID: ownerID)
-                guard content.caption.text == "\(ImportedPlaylistSyncEnvelope.marker) \(envelope.id)" else {
-                    throw ImportedPlaylistSyncError.invalidData
-                }
-                records.append(contentsOf: envelope.records)
+                      content.caption.text.hasPrefix(marker + " "),
+                      content.document.fileName.hasPrefix(filenamePrefix) else { continue }
+                let data = try await readSyncDocument(content.document.document, expectedAccountID: expectedAccountID, client: client)
+                records.append(contentsOf: try decode(data, content.caption.text))
             }
             guard let oldest = messages.map(\.id).min(), oldest > messageID else { break }
             from = oldest
         }
-        return ImportedPlaylistSyncPull(records: records, lastMessageID: newest)
+        return (records, newest)
+    }
+
+    private func readSyncDocument(_ file: File, expectedAccountID: String, client: TDLibClient) async throws -> Data {
+        let limit = ImportedPlaylistSyncEnvelope.maximumBytes
+        guard max(file.size, file.expectedSize) <= Int64(limit) else { throw ImportedPlaylistSyncError.tooLarge }
+        let local = try await client.downloadFile(fileId: file.id, limit: Int64(limit + 1), offset: 0,
+            priority: 16, synchronous: true)
+        try checkImportedSyncAccount(expectedAccountID, client: client)
+        guard local.local.isDownloadingCompleted, !local.local.path.isEmpty else { throw ServiceError.incompleteDownload }
+        let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: local.local.path))
+        defer { try? handle.close() }
+        let data = try handle.read(upToCount: limit + 1) ?? Data()
+        guard data.count <= limit else { throw ImportedPlaylistSyncError.tooLarge }
+        return data
     }
 
     func pushImportedPlaylistSync(_ envelope: ImportedPlaylistSyncEnvelope, chatID: Int64,
                                   expectedAccountID: String) async throws {
+        try await pushSyncDocument(chatID: chatID, ownerID: envelope.ownerUserID, expectedAccountID: expectedAccountID,
+            filename: "telisten-playlist-sync-\(envelope.id).json",
+            caption: "\(ImportedPlaylistSyncEnvelope.marker) \(envelope.id)", encode: envelope.encoded)
+    }
+
+    func pushFavoriteSync(_ envelope: FavoriteSyncEnvelope, chatID: Int64, expectedAccountID: String) async throws {
         let client = try await requireReadyClient()
         try checkImportedSyncAccount(expectedAccountID, client: client)
         guard try await validateImportedSyncChannel(chatID, ownerID: envelope.ownerUserID, client: client) else {
             throw ImportedPlaylistSyncError.unsafeChannel
         }
-        let data = try envelope.encoded()
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("telisten-playlist-sync-\(envelope.id).json")
+        let text = try envelope.encodedText()
+        _ = try await sendImportedSyncMessage(.inputMessageText(InputMessageText(clearDraft: false,
+            linkPreviewOptions: nil, text: FormattedText(entities: [], text: text))),
+            caption: text, chatID: chatID, expectedAccountID: expectedAccountID, client: client)
+    }
+
+    private func pushSyncDocument(chatID: Int64, ownerID: Int64, expectedAccountID: String, filename: String,
+                                  caption: String, encode: () throws -> Data) async throws {
+        let client = try await requireReadyClient()
+        try checkImportedSyncAccount(expectedAccountID, client: client)
+        guard try await validateImportedSyncChannel(chatID, ownerID: ownerID, client: client) else {
+            throw ImportedPlaylistSyncError.unsafeChannel
+        }
+        let data = try encode()
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
         try data.write(to: url, options: .atomic)
         var confirmed = false
         defer { if confirmed { try? FileManager.default.removeItem(at: url) } }
-        let caption = "\(ImportedPlaylistSyncEnvelope.marker) \(envelope.id)"
         _ = try await sendImportedSyncMessage(.inputMessageDocument(InputMessageDocument(
             caption: FormattedText(entities: [], text: caption), document: InputDocument(disableContentTypeDetection: true,
                 document: .inputFileLocal(InputFileLocal(path: url.path)), thumbnail: nil))),

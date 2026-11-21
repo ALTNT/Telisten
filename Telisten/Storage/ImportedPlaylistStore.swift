@@ -46,4 +46,18 @@ final class ImportedPlaylistStore {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try JSONEncoder().encode(Snapshot(playlists: playlists, sync: state)).write(to: url(for: accountID), options: .atomic)
     }
+
+    func loadFavoriteSyncState(for accountID: String) throws -> FavoriteSyncState {
+        let path = url(for: accountID).deletingPathExtension().appendingPathExtension("favorites.json")
+        guard FileManager.default.fileExists(atPath: path.path) else { return FavoriteSyncState() }
+        let state = try JSONDecoder().decode(FavoriteSyncState.self, from: Data(contentsOf: path))
+        try state.validate()
+        return state
+    }
+
+    func saveFavoriteSyncState(_ state: FavoriteSyncState, for accountID: String) throws {
+        let path = url(for: accountID).deletingPathExtension().appendingPathExtension("favorites.json")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try JSONEncoder().encode(state).write(to: path, options: .atomic)
+    }
 }

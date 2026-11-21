@@ -751,8 +751,14 @@ struct LibraryView: View {
                     }
                 } else if !model.isGlobalSearch && !isSelectingTracks {
                     Button("Refresh", systemImage: "arrow.clockwise") {
-                        Task { await model.search() }
+                        Task {
+                            await model.search()
+                            if model.selected == .favorites, model.favoriteSyncEnabled {
+                                await model.syncImportedPlaylists()
+                            }
+                        }
                     }
+                    .disabled(model.selected == .favorites && model.favoriteSyncEnabled && model.isSyncingImportedPlaylists)
                 }
             }
             ToolbarItem(placement: .primaryAction) {

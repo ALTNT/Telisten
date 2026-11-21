@@ -97,8 +97,22 @@ final class AppModel: ObservableObject {
         didSet {
             guard !isApplyingImportedSync else { return }
             UserDefaults.standard.set(importedPlaylistSyncEnabled, forKey: accountStorageKey("importedPlaylist.syncEnabled"))
-            if importedPlaylistSyncEnabled { scheduleImportedPlaylistSync() }
-            else { importedSyncTask?.cancel(); importedSyncScheduleTask?.cancel() }
+            if !importedPlaylistSyncEnabled { importedSyncTask?.cancel(); importedSyncScheduleTask?.cancel() }
+            scheduleImportedPlaylistSync()
+        }
+    }
+    @Published private(set) var favoriteSyncError: String?
+    var favoriteSyncLastSyncedAt: Date? { favoriteSyncState?.lastSyncedAt }
+    var favoriteSyncUnresolvedCount: Int {
+        guard let state = favoriteSyncState else { return 0 }
+        return state.records.values.filter { $0.source != nil && state.tracks[$0.key] == nil }.count
+    }
+    @Published var favoriteSyncEnabled = false {
+        didSet {
+            guard !isApplyingImportedSync else { return }
+            UserDefaults.standard.set(favoriteSyncEnabled, forKey: accountStorageKey("library.favoriteSyncEnabled"))
+            if !favoriteSyncEnabled { importedSyncTask?.cancel(); importedSyncScheduleTask?.cancel() }
+            scheduleImportedPlaylistSync()
         }
     }
     @Published private(set) var resolvingImportedEntryID: String?
@@ -145,6 +159,7 @@ final class AppModel: ObservableObject {
     private var importedSyncOperationID: UUID?
     private var importedSyncNeedsAnotherPass = false
     private var importedSyncStorageIsValid = true
+    @Published private var favoriteSyncState: FavoriteSyncState? = FavoriteSyncState()
     private let libraryPersistenceQueue = DispatchQueue(
         label: "Telisten.AppModel.library-persistence",
         qos: .utility
@@ -1979,8 +1994,10 @@ final class AppModel: ObservableObject {
         knownTracks[track.id] = track
         let matchingIDs = favoriteIDs(matching: track)
         if !matchingIDs.isEmpty {
+            guard recordFavoriteChanges(removing: [track]) else { return }
             favorites.subtract(matchingIDs)
         } else {
+            guard recordFavoriteChanges(adding: [track]) else { return }
             favorites.insert(track.id)
         }
         persistLibrary()
@@ -1988,22 +2005,27 @@ final class AppModel: ObservableObject {
     }
 
     func addFavorites(_ tracks: [Track]) {
-        var addedCount = 0
+        var added: [Track] = []
         for track in tracks {
             knownTracks[track.id] = track
             if !isFavorite(track) {
                 favorites.insert(track.id)
-                addedCount += 1
+                added.append(track)
             }
+        }
+        guard recordFavoriteChanges(adding: added) else {
+            favorites.subtract(added.map(\.id))
+            return
         }
         persistLibrary()
         if selected == .favorites { self.tracks = favorites.compactMap { knownTracks[$0] } }
-        favoritesMessage = addedCount == 0
+        favoritesMessage = added.isEmpty
             ? localizedUI("All selected songs are already in Favorites.")
-            : String(format: localizedUI("Added %lld songs to Favorites."), Int64(addedCount))
+            : String(format: localizedUI("Added %lld songs to Favorites."), Int64(added.count))
     }
 
     func removeFavorites(_ tracks: [Track]) {
+        guard recordFavoriteChanges(removing: tracks) else { return }
         for track in tracks {
             favorites.subtract(favoriteIDs(matching: track))
         }
@@ -3094,6 +3116,8 @@ final class AppModel: ObservableObject {
         isSyncingImportedPlaylists = false
         importedPlaylistSyncError = nil
         importedPlaylistSyncState = ImportedPlaylistSyncState()
+        favoriteSyncError = nil
+        favoriteSyncState = FavoriteSyncState()
         importedSyncNeedsAnotherPass = false
         cancelImportedPlayback()
         importedPreparation?.task.cancel()
@@ -4147,6 +4171,7 @@ final class AppModel: ObservableObject {
             knownTracks[track.id] = track
         }
         allChats = mergedChats(allChats, with: playlists)
+        if let favoriteSyncState { applySyncedFavorites(favoriteSyncState) }
         normalizeFavorites()
         reconcileSharedDownloads(with: cachedIDs)
     }
@@ -4247,73 +4272,100 @@ final class AppModel: ObservableObject {
 
 extension AppModel {
     func syncImportedPlaylists() async {
-        guard importedPlaylistSyncEnabled, !isDemo, !isAddingAccount, phase == .ready,
-              let accountID = activeAccountID, importedSyncStorageIsValid else { return }
+        guard canSyncLibrary, !isDemo, !isAddingAccount, phase == .ready,
+              let accountID = activeAccountID else { return }
         if let existing = importedSyncTask { await existing.value; return }
         let operationID = UUID()
         importedSyncOperationID = operationID
         importedSyncNeedsAnotherPass = false
         isSyncingImportedPlaylists = true
-        importedPlaylistSyncError = nil
+        if importedSyncStorageIsValid { importedPlaylistSyncError = nil }
+        if favoriteSyncState != nil { favoriteSyncError = nil }
         importedSyncTask = Task { [weak self] in
             guard let self else { return }
             defer {
                 if importedSyncOperationID == operationID {
                     importedSyncTask = nil
                     isSyncingImportedPlaylists = false
-                    let again = importedSyncNeedsAnotherPass && importedPlaylistSyncEnabled
+                    let again = importedSyncNeedsAnotherPass && canSyncLibrary
                     importedSyncNeedsAnotherPass = false
                     if again { scheduleImportedPlaylistSync() }
                 }
             }
             do {
                 let location = try await telegram.prepareImportedPlaylistSync(expectedAccountID: accountID,
-                    expectedOwnerID: importedPlaylistSyncState.ownerUserID,
-                    createIfMissing: !importedPlaylistSyncState.pendingUploadRecords.isEmpty)
+                    expectedOwnerID: importedPlaylistSyncState.ownerUserID ?? favoriteSyncState?.ownerUserID,
+                    createIfMissing: (importedPlaylistSyncEnabled && importedSyncStorageIsValid
+                        && !importedPlaylistSyncState.pendingUploadRecords.isEmpty) || favoritesNeedSyncChannel)
                 try checkImportedPlaylistSync(accountID, operationID: operationID)
-                for chatID in location.chatIDs {
-                    let cursor = importedPlaylistSyncState.cursors[String(chatID)] ?? 0
-                    let pull = try await telegram.pullImportedPlaylistSync(chatID: chatID, after: cursor,
-                        ownerID: location.ownerUserID, expectedAccountID: accountID)
-                    try checkImportedPlaylistSync(accountID, operationID: operationID)
-                    // Local edits can happen during awaits. Always merge into the
-                    // current state, never a snapshot captured before networking.
-                    var next = importedPlaylistSyncState
-                    next.ownerUserID = location.ownerUserID
-                    try next.merge(pull.records)
-                    next.cursors[String(chatID)] = pull.lastMessageID
-                    try applyImportedPlaylistSyncState(next)
+                if importedPlaylistSyncEnabled && importedSyncStorageIsValid {
+                    do { try await syncImportedPlaylistRecords(at: location, accountID: accountID, operationID: operationID) }
+                    catch {
+                        try checkImportedPlaylistSync(accountID, operationID: operationID)
+                        importedPlaylistSyncError = UserFacingError.message(for: error)
+                    }
                 }
-                let pending = importedPlaylistSyncState.pendingUploadRecords
-                if location.uploadChatID == 0 && !pending.isEmpty {
-                    // The first local import may have arrived while an empty
-                    // remote account was being checked. Set up its channel next.
-                    importedSyncNeedsAnotherPass = true
-                    return
+                if favoriteSyncEnabled && favoriteSyncState != nil {
+                    do { try await syncFavoriteRecords(at: location, accountID: accountID, operationID: operationID) }
+                    catch {
+                        try checkImportedPlaylistSync(accountID, operationID: operationID)
+                        let failure = error as NSError
+                        PlaybackDiagnostics.log("favorite_sync_failed domain=\(failure.domain) code=\(failure.code)")
+                        favoriteSyncError = UserFacingError.message(for: error)
+                    }
                 }
-                for envelope in try ImportedPlaylistSyncEnvelope.batches(pending, ownerUserID: location.ownerUserID) {
-                    try checkImportedPlaylistSync(accountID, operationID: operationID)
-                    try await telegram.pushImportedPlaylistSync(envelope, chatID: location.uploadChatID, expectedAccountID: accountID)
-                    try checkImportedPlaylistSync(accountID, operationID: operationID)
-                    var next = importedPlaylistSyncState
-                    next.acknowledge(Set(envelope.records.map(\.id)))
-                    // Do not advance the pull cursor to our upload receipt: that
-                    // would skip another device's intervening upload.
-                    try importedPlaylistStore.saveSynchronized(importedPlaylists, state: next, for: localMirrorAccountID)
-                    importedPlaylistSyncState = next
-                }
-                var next = importedPlaylistSyncState
-                next.lastSyncedAt = Date()
-                try importedPlaylistStore.saveSynchronized(importedPlaylists, state: next, for: localMirrorAccountID)
-                importedPlaylistSyncState = next
             } catch is CancellationError {
                 return
             } catch {
                 guard activeAccountID == accountID, importedSyncOperationID == operationID else { return }
-                importedPlaylistSyncError = UserFacingError.message(for: error)
+                if importedPlaylistSyncEnabled && importedSyncStorageIsValid { importedPlaylistSyncError = UserFacingError.message(for: error) }
+                if favoriteSyncEnabled && favoriteSyncState != nil { favoriteSyncError = UserFacingError.message(for: error) }
             }
         }
         await importedSyncTask?.value
+    }
+
+    private var canSyncLibrary: Bool {
+        (importedPlaylistSyncEnabled && importedSyncStorageIsValid) || (favoriteSyncEnabled && favoriteSyncState != nil)
+    }
+
+    private func syncImportedPlaylistRecords(at location: ImportedPlaylistSyncLocation, accountID: String,
+                                             operationID: UUID) async throws {
+        for chatID in location.chatIDs {
+            let cursor = importedPlaylistSyncState.cursors[String(chatID)] ?? 0
+            let pull = try await telegram.pullImportedPlaylistSync(chatID: chatID, after: cursor,
+                ownerID: location.ownerUserID, expectedAccountID: accountID)
+            try checkImportedPlaylistSync(accountID, operationID: operationID)
+            // Local edits can happen during awaits. Always merge into the
+            // current state, never a snapshot captured before networking.
+            var next = importedPlaylistSyncState
+            next.ownerUserID = location.ownerUserID
+            try next.merge(pull.records)
+            next.cursors[String(chatID)] = pull.lastMessageID
+            try applyImportedPlaylistSyncState(next)
+        }
+        let pending = importedPlaylistSyncState.pendingUploadRecords
+        if location.uploadChatID == 0 && !pending.isEmpty {
+            // The first local import may have arrived while an empty
+            // remote account was being checked. Set up its channel next.
+            importedSyncNeedsAnotherPass = true
+            return
+        }
+        for envelope in try ImportedPlaylistSyncEnvelope.batches(pending, ownerUserID: location.ownerUserID) {
+            try checkImportedPlaylistSync(accountID, operationID: operationID)
+            try await telegram.pushImportedPlaylistSync(envelope, chatID: location.uploadChatID, expectedAccountID: accountID)
+            try checkImportedPlaylistSync(accountID, operationID: operationID)
+            var next = importedPlaylistSyncState
+            next.acknowledge(Set(envelope.records.map(\.id)))
+            // Do not advance the pull cursor to our upload receipt: that
+            // would skip another device's intervening upload.
+            try importedPlaylistStore.saveSynchronized(importedPlaylists, state: next, for: localMirrorAccountID)
+            importedPlaylistSyncState = next
+        }
+        var next = importedPlaylistSyncState
+        next.lastSyncedAt = Date()
+        try importedPlaylistStore.saveSynchronized(importedPlaylists, state: next, for: localMirrorAccountID)
+        importedPlaylistSyncState = next
     }
 
     func resolveImportedPlaylistSyncConflict(_ key: String, keepingLocal: Bool) {
@@ -4334,6 +4386,8 @@ extension AppModel {
         importedPlaylistBotID = defaults.string(forKey: accountStorageKey("importedPlaylist.botID")).flatMap(UUID.init(uuidString:))
         let enabledKey = accountStorageKey("importedPlaylist.syncEnabled")
         importedPlaylistSyncEnabled = defaults.object(forKey: enabledKey) == nil || defaults.bool(forKey: enabledKey)
+        favoriteSyncEnabled = defaults.bool(forKey: accountStorageKey("library.favoriteSyncEnabled"))
+        restoreFavoriteSync()
         importedSyncStorageIsValid = true
         importedPlaylistSyncState = ImportedPlaylistSyncState()
         do {
@@ -4348,6 +4402,167 @@ extension AppModel {
             importedSyncStorageIsValid = false
             importedPlaylistSyncError = UserFacingError.message(for: error)
         }
+    }
+
+    private func restoreFavoriteSync() {
+        favoriteSyncError = nil
+        do {
+            favoriteSyncState = try importedPlaylistStore.loadFavoriteSyncState(for: localMirrorAccountID)
+        } catch {
+            favoriteSyncState = nil
+            favoriteSyncError = UserFacingError.message(for: error)
+        }
+    }
+
+    private func recordFavoriteChanges(adding added: [Track] = [], removing removed: [Track] = []) -> Bool {
+        guard !isDemo, !isAddingAccount, activeAccountID != nil, !added.isEmpty || !removed.isEmpty else { return true }
+        guard var next = favoriteSyncState else { return !favoriteSyncEnabled }
+        guard favoriteSyncEnabled || next.didMigrate || !next.records.isEmpty else { return true }
+        for track in added { next.set(track, favorite: true) }
+        if !removed.isEmpty {
+            // Include equivalent copies hidden by the existing favorites deduplication.
+            let candidates = favorites.compactMap { knownTracks[$0] } + Array(next.tracks.values)
+            for track in candidates where removed.contains(where: { $0.id == track.id || sameDownloadedTrack($0, track) }) {
+                next.set(track, favorite: false)
+            }
+        }
+        do {
+            try saveFavoriteSyncState(next)
+            if favoriteSyncEnabled { scheduleImportedPlaylistSync() }
+            return true
+        } catch {
+            favoriteSyncError = UserFacingError.message(for: error)
+            return false
+        }
+    }
+
+    private func saveFavoriteSyncState(_ next: FavoriteSyncState) throws {
+        guard next != favoriteSyncState else { return }
+        try importedPlaylistStore.saveFavoriteSyncState(next, for: localMirrorAccountID)
+        favoriteSyncState = next
+    }
+
+    private func applySyncedFavorites(_ state: FavoriteSyncState) {
+        favorites = favorites.filter { id in
+            guard let track = knownTracks[id] else { return true }
+            let keys = state.knownKeys(for: ImportedAudioSource(track))
+            return keys.isEmpty || keys.contains { state.records[$0]?.source != nil }
+        }
+        for track in state.tracks.values {
+            knownTracks[track.id] = track
+            favorites.insert(track.id)
+        }
+    }
+
+    private func refreshSyncedFavorites(_ state: FavoriteSyncState) {
+        let previous = favorites
+        applySyncedFavorites(state)
+        guard previous != favorites else { return }
+        persistLibrary()
+        if selected == .favorites {
+            let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            tracks = favorites.compactMap { knownTracks[$0] }.sorted { $0.date > $1.date }
+                .filter { matchesSearch($0, query: query) }
+        }
+    }
+
+    private var favoritesNeedSyncChannel: Bool {
+        guard favoriteSyncEnabled, let state = favoriteSyncState else { return false }
+        if !state.pending.isEmpty { return true }
+        if state.didPublishTextRecords != true && !state.records.isEmpty { return true }
+        return favorites.contains { id in
+            guard let track = knownTracks[id] else { return false }
+            let source = ImportedAudioSource(track)
+            return source.favoriteKey != nil && state.knownKeys(for: source).isEmpty
+        }
+    }
+
+    private func syncFavoriteRecords(at location: ImportedPlaylistSyncLocation, accountID: String,
+                                     operationID: UUID) async throws {
+        guard let state = favoriteSyncState,
+              state.ownerUserID == nil || state.ownerUserID == location.ownerUserID else {
+            throw ImportedPlaylistSyncError.accountChanged
+        }
+        PlaybackDiagnostics.log("favorite_sync_start channels=\(location.chatIDs.count) local=\(favorites.count) pending=\(state.pending.count)")
+        for chatID in location.chatIDs {
+            let cursor = favoriteSyncState?.messageCursors?[String(chatID)] ?? 0
+            PlaybackDiagnostics.log("favorite_sync_pull_start fromBeginning=\(cursor == 0)")
+            let pull = try await telegram.pullFavoriteSync(chatID: chatID, after: cursor,
+                ownerID: location.ownerUserID, expectedAccountID: accountID)
+            try checkImportedPlaylistSync(accountID, operationID: operationID)
+            guard var next = favoriteSyncState else { return }
+            next.ownerUserID = location.ownerUserID
+            try next.merge(pull.records)
+            var messageCursors = next.messageCursors ?? [:]
+            messageCursors[String(chatID)] = pull.lastMessageID
+            next.messageCursors = messageCursors
+            try saveFavoriteSyncState(next)
+            refreshSyncedFavorites(next)
+            PlaybackDiagnostics.log("favorite_sync_pull_complete records=\(pull.records.count)")
+        }
+        guard var next = favoriteSyncState else { return }
+        next.migrate(favorites.compactMap { knownTracks[$0] }.sorted { $0.date > $1.date })
+        if next.didPublishTextRecords != true {
+            // Old clients may have acknowledged an attachment which another
+            // device cannot find. Re-send the current winners with their original revisions.
+            next.pending = next.records
+        }
+        try saveFavoriteSyncState(next)
+        let pending = next.pending.values.sorted { $0.key < $1.key }
+        if location.uploadChatID == 0 && !pending.isEmpty {
+            importedSyncNeedsAnotherPass = true
+            return
+        }
+        for envelope in try FavoriteSyncEnvelope.textBatches(pending, ownerUserID: location.ownerUserID) {
+            try checkImportedPlaylistSync(accountID, operationID: operationID)
+            PlaybackDiagnostics.log("favorite_sync_upload_start records=\(envelope.records.count)")
+            try await telegram.pushFavoriteSync(envelope, chatID: location.uploadChatID, expectedAccountID: accountID)
+            try checkImportedPlaylistSync(accountID, operationID: operationID)
+            guard var current = favoriteSyncState else { return }
+            current.acknowledge(Set(envelope.records.map(\.id)))
+            try saveFavoriteSyncState(current)
+            PlaybackDiagnostics.log("favorite_sync_upload_complete records=\(envelope.records.count)")
+        }
+        if var current = favoriteSyncState, current.pending.isEmpty {
+            current.didPublishTextRecords = true
+            try saveFavoriteSyncState(current)
+        }
+        try await resolveSyncedFavorites(accountID: accountID, operationID: operationID)
+        try checkImportedPlaylistSync(accountID, operationID: operationID)
+        if var current = favoriteSyncState {
+            current.lastSyncedAt = Date()
+            try saveFavoriteSyncState(current)
+            let unresolved = current.records.values.filter { $0.source != nil && current.tracks[$0.key] == nil }.count
+            PlaybackDiagnostics.log("favorite_sync_complete visible=\(favorites.count) pending=\(current.pending.count) unresolved=\(unresolved)")
+        }
+    }
+
+    private func resolveSyncedFavorites(accountID: String, operationID: UUID) async throws {
+        guard let state = favoriteSyncState else { return }
+        let unresolved = state.records.values.filter { $0.source != nil && state.tracks[$0.key] == nil }
+        guard !unresolved.isEmpty else { return }
+        let localTracks = Dictionary(knownTracks.values.flatMap { track in
+            let source = ImportedAudioSource(track)
+            return [source.favoriteKey, source.favoriteMessageKey].compactMap { $0 }.map { ($0, track) }
+        }, uniquingKeysWith: { first, second in first.date >= second.date ? first : second })
+        var resolved: [String: Track] = [:]
+        for record in unresolved {
+            guard let source = record.source else { continue }
+            if let local = localTracks[record.key] {
+                resolved[record.key] = local
+            } else {
+                // An inaccessible original can be retried on the next sync.
+                resolved[record.key] = try? await telegram.restoreImportedAudioSource(source, expectedAccountID: accountID)
+                try checkImportedPlaylistSync(accountID, operationID: operationID)
+            }
+        }
+        guard var next = favoriteSyncState else { return }
+        for (key, track) in resolved where next.records[key]?.source != nil && next.tracks[key] == nil
+            && ImportedAudioSource(track).matchesFavoriteKey(key) {
+            next.tracks[key] = track
+        }
+        try saveFavoriteSyncState(next)
+        refreshSyncedFavorites(next)
     }
 
     // Keep the visible library and its outbox in one atomic file. An offline
@@ -4376,7 +4591,7 @@ extension AppModel {
     }
 
     private func scheduleImportedPlaylistSync() {
-        guard importedPlaylistSyncEnabled, !isDemo, !isAddingAccount, phase == .ready else { return }
+        guard canSyncLibrary, !isDemo, !isAddingAccount, phase == .ready else { return }
         if importedSyncTask != nil { importedSyncNeedsAnotherPass = true; return }
         importedSyncScheduleTask?.cancel()
         importedSyncScheduleTask = Task { [weak self] in
@@ -4390,7 +4605,7 @@ extension AppModel {
     private func checkImportedPlaylistSync(_ accountID: String, operationID: UUID) throws {
         try Task.checkCancellation()
         guard activeAccountID == accountID, importedSyncOperationID == operationID,
-              importedPlaylistSyncEnabled else { throw CancellationError() }
+              canSyncLibrary else { throw CancellationError() }
     }
 
     private func applyImportedPlaylistSyncState(_ next: ImportedPlaylistSyncState) throws {

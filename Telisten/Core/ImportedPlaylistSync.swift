@@ -10,6 +10,191 @@ struct ImportedAudioSource: Codable, Equatable, Sendable {
         messageID = track.messageID
         remoteUniqueID = track.remoteUniqueID
     }
+
+    var favoriteMessageKey: String? {
+        guard chatID.utf8.count <= 20, let chatID = Int64(chatID), chatID != 0, messageID > 0 else { return nil }
+        return "message:\(chatID):\(messageID)"
+    }
+
+    var favoriteKey: String? {
+        guard let favoriteMessageKey else { return nil }
+        if let remoteUniqueID, !remoteUniqueID.isEmpty, remoteUniqueID.utf8.count <= 505 {
+            return "remote:\(remoteUniqueID)"
+        }
+        return favoriteMessageKey
+    }
+
+    func matchesFavoriteKey(_ key: String) -> Bool {
+        favoriteKey == key || favoriteMessageKey == key
+    }
+}
+
+struct FavoriteSyncRecord: Codable, Equatable, Sendable {
+    var id = UUID()
+    var key: String
+    var revision: Int64
+    // Keep removal records so an old offline favorite cannot resurrect a song.
+    var source: ImportedAudioSource?
+
+    func isNewer(than other: Self) -> Bool {
+        if revision != other.revision { return revision > other.revision }
+        if (source == nil) != (other.source == nil) { return source == nil }
+        return id.uuidString > other.id.uuidString
+    }
+
+    func validate() throws {
+        guard !key.isEmpty, key.utf8.count <= 512, revision > 0, revision < 1_000_000_000_000_000,
+              source.map({ source in
+                  (source.remoteUniqueID?.utf8.count ?? 0) <= 505 && source.matchesFavoriteKey(key)
+              }) ?? true else { throw ImportedPlaylistSyncError.invalidData }
+    }
+}
+
+struct FavoriteSyncState: Codable, Equatable, Sendable {
+    var didMigrate = false
+    var ownerUserID: Int64?
+    var cursors: [String: Int64] = [:]
+    // Earlier builds advanced cursors on unrelated messages. Ignore those
+    // cursors and replay the favorite documents once on upgraded devices.
+    var documentCursors: [String: Int64]?
+    // Use a fresh cursor on upgrade so older attachment records can be read
+    // alongside the new text messages.
+    var messageCursors: [String: Int64]?
+    var didPublishTextRecords: Bool?
+    var lastSyncedAt: Date?
+    var records: [String: FavoriteSyncRecord] = [:]
+    var pending: [String: FavoriteSyncRecord] = [:]
+    // Resolved tracks are local so favorites remain visible without a network.
+    var tracks: [String: Track] = [:]
+
+    func knownKeys(for source: ImportedAudioSource) -> Set<String> {
+        Set([source.favoriteKey, source.favoriteMessageKey].compactMap { $0 }.filter { records[$0] != nil })
+    }
+
+    mutating func set(_ track: Track, favorite: Bool) {
+        var source = ImportedAudioSource(track)
+        guard let preferred = source.favoriteKey else { return }
+        if (source.remoteUniqueID?.utf8.count ?? 0) > 505 { source.remoteUniqueID = nil }
+        let known = knownKeys(for: source)
+        let keys = favorite ? [known.contains(preferred) ? preferred : known.first ?? preferred]
+            : (known.isEmpty ? [preferred] : known.sorted())
+        let nextSource = favorite ? source : nil
+        for key in keys {
+            let previous = records[key]
+            if previous == nil || previous?.source != nextSource {
+                let record = FavoriteSyncRecord(key: key, revision: (previous?.revision ?? 0) + 1, source: nextSource)
+                records[key] = record
+                pending[key] = record
+            }
+            tracks[key] = favorite ? track : nil
+        }
+    }
+
+    mutating func migrate(_ local: [Track]) {
+        // Reconcile after pulling every channel. Some legacy favorites may
+        // only acquire usable track metadata after the initial sync.
+        for track in local {
+            guard knownKeys(for: ImportedAudioSource(track)).isEmpty else { continue }
+            set(track, favorite: true)
+        }
+        didMigrate = true
+    }
+
+    mutating func merge(_ incoming: [FavoriteSyncRecord]) throws {
+        for record in incoming { try record.validate() }
+        acknowledge(Set(incoming.map(\.id)))
+        for record in incoming where records[record.key].map({ record.isNewer(than: $0) }) ?? true {
+            records[record.key] = record
+            pending[record.key] = nil
+            if record.source == nil { tracks[record.key] = nil }
+        }
+    }
+
+    mutating func acknowledge(_ ids: Set<UUID>) {
+        pending = pending.filter { !ids.contains($0.value.id) }
+    }
+
+    func validate() throws {
+        guard ownerUserID.map({ $0 > 0 }) ?? true, cursors.values.allSatisfy({ $0 >= 0 }),
+              documentCursors?.values.allSatisfy({ $0 >= 0 }) ?? true,
+              messageCursors?.values.allSatisfy({ $0 >= 0 }) ?? true else {
+            throw ImportedPlaylistSyncError.invalidData
+        }
+        for (key, record) in records {
+            try record.validate()
+            guard key == record.key else { throw ImportedPlaylistSyncError.invalidData }
+        }
+        for (key, record) in pending {
+            guard records[key] == record else { throw ImportedPlaylistSyncError.invalidData }
+        }
+        for (key, track) in tracks {
+            guard records[key]?.source != nil, ImportedAudioSource(track).matchesFavoriteKey(key) else {
+                throw ImportedPlaylistSyncError.invalidData
+            }
+        }
+    }
+}
+
+struct FavoriteSyncEnvelope: Codable, Sendable {
+    static let marker = "#TelistenFavoritesV1"
+    static let filenamePrefix = "telisten-favorites-sync-"
+    // A validated record is small enough for 1,000 records per document.
+    static let batchSize = 1_000
+    static let maximumTextBytes = 3_800
+    var version = 1
+    var id = UUID()
+    var ownerUserID: Int64
+    var records: [FavoriteSyncRecord]
+
+    func validate(ownerUserID: Int64) throws {
+        guard version == 1, self.ownerUserID == ownerUserID, ownerUserID > 0,
+              records.count <= Self.batchSize else { throw ImportedPlaylistSyncError.invalidData }
+        for record in records { try record.validate() }
+    }
+
+    func encodedText() throws -> String {
+        try validate(ownerUserID: ownerUserID)
+        let json = try JSONEncoder().encode(self)
+        let text = Self.marker + "\n" + String(decoding: json, as: UTF8.self)
+        guard text.utf8.count <= Self.maximumTextBytes else { throw ImportedPlaylistSyncError.tooLarge }
+        return text
+    }
+
+    static func decodeText(_ text: String, ownerUserID: Int64) throws -> Self {
+        guard text.utf8.count <= maximumTextBytes, text.hasPrefix(marker + "\n") else {
+            throw ImportedPlaylistSyncError.invalidData
+        }
+        let data = Data(text.dropFirst(marker.count + 1).utf8)
+        let envelope = try JSONDecoder().decode(Self.self, from: data)
+        try envelope.validate(ownerUserID: ownerUserID)
+        return envelope
+    }
+
+    static func textBatches(_ records: [FavoriteSyncRecord], ownerUserID: Int64) throws -> [Self] {
+        let encoder = JSONEncoder()
+        let overhead = try Self(ownerUserID: ownerUserID, records: []).encodedText().utf8.count
+        var result: [Self] = []
+        var batch: [FavoriteSyncRecord] = []
+        var size = overhead
+        for record in records {
+            let bytes = try encoder.encode(record).count + 1
+            guard overhead + bytes <= maximumTextBytes else { throw ImportedPlaylistSyncError.tooLarge }
+            if size + bytes > maximumTextBytes {
+                result.append(Self(ownerUserID: ownerUserID, records: batch))
+                batch = []
+                size = overhead
+            }
+            batch.append(record)
+            size += bytes
+        }
+        if !batch.isEmpty { result.append(Self(ownerUserID: ownerUserID, records: batch)) }
+        return result
+    }
+}
+
+struct FavoriteSyncPull: Sendable {
+    var records: [FavoriteSyncRecord]
+    var lastMessageID: Int64
 }
 
 struct ImportedSyncBot: Codable, Equatable, Sendable {

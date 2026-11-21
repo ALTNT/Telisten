@@ -61,13 +61,23 @@ struct ImportedPlaylistsView: View {
                     Text("Choose a bot that supports /music with NetEase and QQ Music song links. Add bots in Settings first. The bot's default quality is used.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                Section("Playlist sync") {
-                    Toggle("Sync using Telegram", isOn: $model.importedPlaylistSyncEnabled)
+                Section("Telegram sync") {
+                    Toggle("Sync imported playlists", isOn: $model.importedPlaylistSyncEnabled)
+                    Toggle("Sync Favorites", isOn: $model.favoriteSyncEnabled)
                     if model.isSyncingImportedPlaylists {
-                        ProgressView("Syncing playlists…")
+                        ProgressView("Syncing…")
                     }
                     if let date = model.importedPlaylistSyncState.lastSyncedAt {
-                        LabeledContent("Last synced", value: date.formatted(date: .abbreviated, time: .shortened))
+                        LabeledContent("Imported playlists last synced", value: date.formatted(date: .abbreviated, time: .shortened))
+                    }
+                    if model.favoriteSyncEnabled {
+                        if let date = model.favoriteSyncLastSyncedAt {
+                            LabeledContent("Favorites last synced", value: date.formatted(date: .abbreviated, time: .shortened))
+                        }
+                        if model.favoriteSyncUnresolvedCount > 0 {
+                            Text("Favorites awaiting audio recovery: \(model.favoriteSyncUnresolvedCount)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                     if !model.importedPlaylistSyncState.pending.isEmpty {
                         Text("\(model.importedPlaylistSyncState.pending.count) changes waiting to sync")
@@ -76,8 +86,12 @@ struct ImportedPlaylistsView: View {
                     if let error = model.importedPlaylistSyncError {
                         Text(localizedUI(error)).font(.caption).foregroundStyle(.red)
                     }
+                    if let error = model.favoriteSyncError, error != model.importedPlaylistSyncError {
+                        Text(localizedUI(error)).font(.caption).foregroundStyle(.red)
+                    }
                     Button("Sync now") { Task { await model.syncImportedPlaylists() } }
-                        .disabled(!model.importedPlaylistSyncEnabled || model.isSyncingImportedPlaylists || model.isDemo || model.activeAccountID == nil)
+                        .disabled(!(model.importedPlaylistSyncEnabled || model.favoriteSyncEnabled)
+                            || model.isSyncingImportedPlaylists || model.isDemo || model.activeAccountID == nil)
                     if !model.importedPlaylistSyncState.conflicts.isEmpty {
                         NavigationLink {
                             ImportedPlaylistSyncConflictsView(model: model)
