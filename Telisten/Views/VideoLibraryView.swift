@@ -253,12 +253,12 @@ private struct VideoChannelView: View {
             if isLoading { ProgressView() }
             if let errorMessage {
                 Text(errorMessage).foregroundStyle(.red)
-                Button("Retry") { Task { await load(reset: items.isEmpty) } }
+                Button("Retry") { Task { await load(reset: items.isEmpty && nextOffset == nil) } }
             }
             if nextOffset != nil, !isLoading {
                 Button("Load more") { Task { await load(reset: false) } }
             }
-            if items.isEmpty, !isLoading, errorMessage == nil {
+            if items.isEmpty, nextOffset == nil, !isLoading, errorMessage == nil {
                 Text("No videos found.").foregroundStyle(.secondary)
             }
         }
@@ -387,7 +387,10 @@ private struct VideoChannelView: View {
             try Task.checkCancellation()
             guard generation == requestID else { return }
             var seen = Set(items.map(\.id))
-            items.append(contentsOf: page.items.filter { seen.insert($0.id).inserted })
+            // Video documents can have no duration. Keep them and use the raw page cursor.
+            items.append(contentsOf: page.items.filter { video in
+                (video.duration <= 0 || video.duration >= 5 * 60) && seen.insert(video.id).inserted
+            })
             nextOffset = page.nextOffset
             if page.nextOffset == requestedOffset {
                 errorMessage = localizedUI("Some videos loaded, but the document search timed out. Retry to load the remaining videos.")
@@ -415,7 +418,6 @@ private struct VideoPlaybackView: View {
     @State private var isPictureInPictureActive = false
     #endif
     @State private var started = false
-    private var closeWindow: (() -> Void)?
 
     init(service: TelegramService, original: VideoItem, accountID: String, musicPlayer: AudioPlayer) {
         self.musicPlayer = musicPlayer
@@ -423,9 +425,8 @@ private struct VideoPlaybackView: View {
     }
 
     #if os(macOS)
-    init(playback: VideoPlaybackModel, musicPlayer: AudioPlayer, closeWindow: @escaping () -> Void) {
+    init(playback: VideoPlaybackModel, musicPlayer: AudioPlayer) {
         self.musicPlayer = musicPlayer
-        self.closeWindow = closeWindow
         _playback = StateObject(wrappedValue: playback)
     }
     #endif
@@ -435,8 +436,7 @@ private struct VideoPlaybackView: View {
         // End the session on an explicit close, before dismissing the cover.
         playback.stop()
         #endif
-        if let closeWindow { closeWindow() }
-        else { dismiss() }
+        dismiss()
     }
 
     var body: some View {
@@ -536,14 +536,60 @@ private struct VideoPlaybackView: View {
         .tint(.white)
         .preferredColorScheme(.dark)
         .statusBarHidden()
+        #elseif os(macOS)
+        VStack(spacing: 0) {
+            VideoSurfaceView(player: playback.player)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(.black)
+                .overlay {
+                    // Playback feedback overlays the picture so buffering never resizes it.
+                    Group {
+                        if let error = playback.errorMessage {
+                            VStack(spacing: 12) {
+                                Text(error).multilineTextAlignment(.center)
+                                Button("Retry") { playback.start(prefer1080p: prefer1080p, playOriginal: playback.usingOriginal) }
+                                    .buttonStyle(.borderedProminent)
+                            }
+                            .padding(16)
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                            .padding(16)
+                        } else if playback.isLoading || playback.isBuffering {
+                            ProgressView(playback.isLoading ? "Preparing video…" : "Buffering video…")
+                                .padding(16)
+                                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .environment(\.colorScheme, .dark)
+                }
+            Divider()
+            HStack(spacing: 12) {
+                if let choice = playback.choice {
+                    Group {
+                        if choice.selected.id != choice.original.id {
+                            Text("1080P from comments")
+                        } else if choice.commentsUnavailable {
+                            Text("Comments unavailable. Playing the original video.")
+                        } else {
+                            Text("Channel original")
+                        }
+                    }
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Button("Play original video") { playback.start(prefer1080p: false, playOriginal: true) }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            .frame(minHeight: 40)
+            .background(Color(nsColor: .windowBackgroundColor))
+        }
         #else
         NavigationStack {
             VStack(spacing: 12) {
-                #if os(macOS)
-                VideoSurfaceView(player: playback.player).frame(minHeight: 220)
-                #else
                 VideoPlayer(player: playback.player).frame(minHeight: 220)
-                #endif
                 if playback.isLoading { ProgressView("Preparing video…") }
                 else if playback.isBuffering { ProgressView("Buffering video…") }
                 if let choice = playback.choice {
@@ -644,17 +690,15 @@ final class VideoPlaybackWindow: NSObject, NSWindowDelegate {
         // ownership unchanged when a different episode is selected.
         close()
         let playback = VideoPlaybackModel(service: service, original: original, accountID: accountID)
-        let content = VideoPlaybackView(playback: playback, musicPlayer: musicPlayer) { [weak self] in
-            self?.close()
-        }
+        let content = VideoPlaybackView(playback: playback, musicPlayer: musicPlayer)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 960, height: 680),
+            contentRect: NSRect(x: 0, y: 0, width: 960, height: 581),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false
         )
         window.title = original.title
         window.isReleasedWhenClosed = false
-        window.contentMinSize = NSSize(width: 760, height: 540)
+        window.contentMinSize = NSSize(width: 760, height: 470)
         window.contentViewController = NSHostingController(rootView: content)
         window.delegate = self
         window.setFrameAutosaveName("TelistenVideoPlayback")
@@ -760,6 +804,7 @@ private struct VideoSurfaceView: NSViewRepresentable {
     func makeNSView(context: Context) -> AVPlayerView {
         let view = AVPlayerView()
         view.player = player
+        view.videoGravity = .resizeAspect
         view.controlsStyle = .floating
         view.showsFullScreenToggleButton = true
         view.allowsPictureInPicturePlayback = true
